@@ -1,4 +1,4 @@
-import type { Conversation, Message, ToolCall, SourceRef, SourceType } from '../schema/index.js';
+import type { Conversation, Message, ToolCall, SourceRef, SourceType, ConversationFile, MessageFile } from '../schema/index.js';
 
 export interface SourceLocation {
   source: SourceType;
@@ -11,6 +11,8 @@ export interface NormalizedConversation {
   conversation: Conversation;
   messages: Message[];
   toolCalls: ToolCall[];
+  files?: ConversationFile[];
+  messageFiles?: MessageFile[];
 }
 
 export interface SourceAdapter {

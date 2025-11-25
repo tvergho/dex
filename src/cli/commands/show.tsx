@@ -2,14 +2,16 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { render, Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index.js';
-import { conversationRepo, messageRepo } from '../../db/repository.js';
-import type { Conversation, Message } from '../../schema/index.js';
+import { conversationRepo, messageRepo, filesRepo, messageFilesRepo } from '../../db/repository.js';
+import type { Conversation, Message, ConversationFile, MessageFile } from '../../schema/index.js';
 
 function MessageView({
   message,
+  messageFiles,
   width,
 }: {
   message: Message;
+  messageFiles: MessageFile[];
   width: number;
 }) {
   const roleLabel = message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Assistant' : 'System';
@@ -21,9 +23,20 @@ function MessageView({
     ? message.content.slice(0, maxContentLength) + '\n… (truncated)'
     : message.content;
 
+  // Get file names for this message
+  const fileNames = messageFiles.map((f) => {
+    const parts = f.filePath.split('/');
+    return parts[parts.length - 1] || f.filePath;
+  });
+
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Text color={roleColor} bold>[{roleLabel}]</Text>
+      <Box>
+        <Text color={roleColor} bold>[{roleLabel}]</Text>
+        {fileNames.length > 0 && (
+          <Text dimColor> ({fileNames.join(', ')})</Text>
+        )}
+      </Box>
       <Box marginLeft={2}>
         <Text wrap="wrap">{content}</Text>
       </Box>
@@ -38,6 +51,8 @@ function ShowApp({ conversationId }: { conversationId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [files, setFiles] = useState<ConversationFile[]>([]);
+  const [messageFiles, setMessageFiles] = useState<MessageFile[]>([]);
   const [scrollOffset, setScrollOffset] = useState(0);
 
   useEffect(() => {
@@ -53,6 +68,12 @@ function ShowApp({ conversationId }: { conversationId: string }) {
 
         const msgs = await messageRepo.findByConversation(conversationId);
         setMessages(msgs);
+
+        const convFiles = await filesRepo.findByConversation(conversationId);
+        setFiles(convFiles);
+
+        const msgFiles = await messageFilesRepo.findByConversation(conversationId);
+        setMessageFiles(msgFiles);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -114,25 +135,69 @@ function ShowApp({ conversationId }: { conversationId: string }) {
     );
   }
 
+  // Build project context info
+  const projectParts: string[] = [];
+  if (conversation.projectName) {
+    projectParts.push(conversation.projectName);
+  } else if (conversation.workspacePath) {
+    const parts = conversation.workspacePath.split('/').filter(Boolean);
+    if (parts.length > 0) {
+      projectParts.push(parts[parts.length - 1]!);
+    }
+  }
+  if (conversation.mode) {
+    projectParts.push(conversation.mode);
+  }
+  if (conversation.model) {
+    projectParts.push(conversation.model);
+  }
+
+  // Get file names
+  const fileNames = files.slice(0, 5).map((f) => {
+    const parts = f.filePath.split('/');
+    return parts[parts.length - 1] || f.filePath;
+  });
+
+  // Adjust header height based on content
+  const dynamicHeaderHeight = 4 + (projectParts.length > 0 ? 1 : 0) + (fileNames.length > 0 ? 1 : 0);
+
   // Show messages starting from scrollOffset
-  const visibleMessages = messages.slice(scrollOffset, scrollOffset + Math.max(1, Math.floor(availableHeight / 4)));
+  const visibleMessages = messages.slice(scrollOffset, scrollOffset + Math.max(1, Math.floor((height - dynamicHeaderHeight - footerHeight) / 4)));
 
   return (
     <Box width={width} height={height} flexDirection="column">
       {/* Header */}
       <Box flexDirection="column" paddingX={1} marginBottom={1}>
         <Text bold color="cyan">{conversation.title}</Text>
+        {projectParts.length > 0 && (
+          <Text color="yellow">{projectParts.join(' · ')}</Text>
+        )}
+        {conversation.workspacePath && (
+          <Text color="magenta">
+            {conversation.workspacePath.length > width - 4
+              ? '…' + conversation.workspacePath.slice(-(width - 7))
+              : conversation.workspacePath}
+          </Text>
+        )}
+        {fileNames.length > 0 && (
+          <Text dimColor>
+            Files: {fileNames.join(', ')}{files.length > 5 ? ` (+${files.length - 5} more)` : ''}
+          </Text>
+        )}
         <Text dimColor>
-          [{conversation.source}] · {conversation.messageCount} messages
+          {conversation.messageCount} messages
           {messages.length > 0 && ` · Viewing ${scrollOffset + 1}-${Math.min(scrollOffset + visibleMessages.length, messages.length)} of ${messages.length}`}
         </Text>
       </Box>
 
       {/* Messages */}
       <Box flexDirection="column" flexGrow={1} paddingX={1} overflowY="hidden">
-        {visibleMessages.map((msg) => (
-          <MessageView key={msg.id} message={msg} width={width - 4} />
-        ))}
+        {visibleMessages.map((msg) => {
+          const msgFiles = messageFiles.filter((f) => f.messageId === msg.id);
+          return (
+            <MessageView key={msg.id} message={msg} messageFiles={msgFiles} width={width - 4} />
+          );
+        })}
       </Box>
 
       {/* Footer */}
@@ -153,15 +218,51 @@ async function plainShow(conversationId: string): Promise<void> {
   }
 
   const messages = await messageRepo.findByConversation(conversationId);
+  const files = await filesRepo.findByConversation(conversationId);
+  const msgFiles = await messageFilesRepo.findByConversation(conversationId);
 
   console.log(`\n${'─'.repeat(60)}`);
   console.log(conversation.title);
-  console.log(`[${conversation.source}] · ${conversation.messageCount} messages`);
+
+  // Project context
+  const projectParts: string[] = [];
+  if (conversation.projectName) projectParts.push(conversation.projectName);
+  if (conversation.mode) projectParts.push(conversation.mode);
+  if (conversation.model) projectParts.push(conversation.model);
+  if (projectParts.length > 0) {
+    console.log(projectParts.join(' · '));
+  }
+
+  if (conversation.workspacePath) {
+    console.log(conversation.workspacePath);
+  }
+
+  if (files.length > 0) {
+    const fileNames = files.slice(0, 5).map((f) => {
+      const parts = f.filePath.split('/');
+      return parts[parts.length - 1] || f.filePath;
+    });
+    console.log(`Files: ${fileNames.join(', ')}${files.length > 5 ? ` (+${files.length - 5} more)` : ''}`);
+  }
+
+  console.log(`${conversation.messageCount} messages`);
   console.log(`${'─'.repeat(60)}\n`);
 
   for (const msg of messages) {
     const roleLabel = msg.role === 'user' ? 'You' : msg.role === 'assistant' ? 'Assistant' : 'System';
-    console.log(`[${roleLabel}]`);
+
+    // Get files for this message
+    const filesForMsg = msgFiles.filter((f) => f.messageId === msg.id);
+    const fileNames = filesForMsg.map((f) => {
+      const parts = f.filePath.split('/');
+      return parts[parts.length - 1] || f.filePath;
+    });
+
+    if (fileNames.length > 0) {
+      console.log(`[${roleLabel}] (${fileNames.join(', ')})`);
+    } else {
+      console.log(`[${roleLabel}]`);
+    }
 
     const content = msg.content.length > 4000 ? msg.content.slice(0, 4000) + '\n… (truncated)' : msg.content;
     console.log(content);

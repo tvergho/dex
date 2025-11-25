@@ -9,6 +9,8 @@ let conversationsTable: Table | null = null;
 let messagesTable: Table | null = null;
 let toolCallsTable: Table | null = null;
 let syncStateTable: Table | null = null;
+let filesTable: Table | null = null;
+let messageFilesTable: Table | null = null;
 
 export async function connect(): Promise<lancedb.Connection> {
   if (db) return db;
@@ -49,6 +51,20 @@ export async function getSyncStateTable(): Promise<Table> {
   return syncStateTable!;
 }
 
+export async function getFilesTable(): Promise<Table> {
+  if (!filesTable) {
+    await connect();
+  }
+  return filesTable!;
+}
+
+export async function getMessageFilesTable(): Promise<Table> {
+  if (!messageFilesTable) {
+    await connect();
+  }
+  return messageFilesTable!;
+}
+
 async function ensureTables(): Promise<void> {
   if (!db) throw new Error('Database not connected');
 
@@ -64,6 +80,9 @@ async function ensureTables(): Promise<void> {
         title: '',
         subtitle: '',           // Empty string instead of null
         workspacePath: '',      // Empty string instead of null
+        projectName: '',        // Empty string instead of null
+        model: '',              // Empty string instead of null
+        mode: '',               // Empty string instead of null
         createdAt: '',          // Empty string instead of null
         updatedAt: '',          // Empty string instead of null
         messageCount: 0,
@@ -127,6 +146,37 @@ async function ensureTables(): Promise<void> {
   } else {
     syncStateTable = await db.openTable('sync_state');
   }
+
+  // Conversation files table
+  if (!existingTables.includes('conversation_files')) {
+    filesTable = await db.createTable('conversation_files', [
+      {
+        id: '_placeholder_',
+        conversationId: '',
+        filePath: '',
+        role: 'context',
+      },
+    ]);
+    await filesTable.delete("id = '_placeholder_'");
+  } else {
+    filesTable = await db.openTable('conversation_files');
+  }
+
+  // Message files table (per-message file associations)
+  if (!existingTables.includes('message_files')) {
+    messageFilesTable = await db.createTable('message_files', [
+      {
+        id: '_placeholder_',
+        messageId: '',
+        conversationId: '',
+        filePath: '',
+        role: 'context',
+      },
+    ]);
+    await messageFilesTable.delete("id = '_placeholder_'");
+  } else {
+    messageFilesTable = await db.openTable('message_files');
+  }
 }
 
 export async function closeConnection(): Promise<void> {
@@ -135,6 +185,8 @@ export async function closeConnection(): Promise<void> {
   messagesTable = null;
   toolCallsTable = null;
   syncStateTable = null;
+  filesTable = null;
+  messageFilesTable = null;
 }
 
 export async function rebuildFtsIndex(): Promise<void> {

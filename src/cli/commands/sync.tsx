@@ -8,6 +8,8 @@ import {
   messageRepo,
   toolCallRepo,
   syncStateRepo,
+  filesRepo,
+  messageFilesRepo,
 } from '../../db/repository.js';
 
 interface SyncProgress {
@@ -157,9 +159,11 @@ async function runSync(
         for (const raw of rawConversations) {
           const normalized = adapter.normalize(raw, location);
 
-          // Delete existing messages and tool calls for this conversation
+          // Delete existing messages, tool calls, and files for this conversation
           await messageRepo.deleteByConversation(normalized.conversation.id);
           await toolCallRepo.deleteByConversation(normalized.conversation.id);
+          await filesRepo.deleteByConversation(normalized.conversation.id);
+          await messageFilesRepo.deleteByConversation(normalized.conversation.id);
 
           // Insert conversation (upsert handles duplicates)
           await conversationRepo.upsert(normalized.conversation);
@@ -174,6 +178,16 @@ async function runSync(
           // Insert tool calls
           if (normalized.toolCalls.length > 0) {
             await toolCallRepo.bulkInsert(normalized.toolCalls);
+          }
+
+          // Insert files
+          if (normalized.files && normalized.files.length > 0) {
+            await filesRepo.bulkInsert(normalized.files);
+          }
+
+          // Insert message files
+          if (normalized.messageFiles && normalized.messageFiles.length > 0) {
+            await messageFilesRepo.bulkInsert(normalized.messageFiles);
           }
 
           onProgress({ ...progress });

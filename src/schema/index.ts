@@ -43,12 +43,34 @@ export const Conversation = z.object({
   title: z.string(),
   subtitle: z.string().optional(),
   workspacePath: z.string().optional(),
+  projectName: z.string().optional(),
+  model: z.string().optional(),
+  mode: z.string().optional(), // 'chat', 'edit', 'agent', etc.
   createdAt: z.string().datetime().optional(),
   updatedAt: z.string().datetime().optional(),
   messageCount: z.number(),
   sourceRef: SourceRef,
 });
 export type Conversation = z.infer<typeof Conversation>;
+
+// Files associated with a conversation
+export const ConversationFile = z.object({
+  id: z.string(),
+  conversationId: z.string(),
+  filePath: z.string(),
+  role: z.enum(['context', 'edited', 'mentioned']), // how the file was involved
+});
+export type ConversationFile = z.infer<typeof ConversationFile>;
+
+// Files associated with a specific message
+export const MessageFile = z.object({
+  id: z.string(),
+  messageId: z.string(),
+  conversationId: z.string(),
+  filePath: z.string(),
+  role: z.enum(['context', 'edited', 'mentioned']), // how the file was involved in this message
+});
+export type MessageFile = z.infer<typeof MessageFile>;
 
 // Sync state for incremental updates
 export const SyncState = z.object({

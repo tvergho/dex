@@ -3,6 +3,8 @@ import {
   getMessagesTable,
   getToolCallsTable,
   getSyncStateTable,
+  getFilesTable,
+  getMessageFilesTable,
 } from './index.js';
 import type {
   Conversation,
@@ -13,6 +15,8 @@ import type {
   MessageMatch,
   ConversationResult,
   SearchResponse,
+  ConversationFile,
+  MessageFile,
 } from '../schema/index.js';
 
 // Helper to group array by key
@@ -105,6 +109,9 @@ export const conversationRepo = {
       title: conv.title,
       subtitle: conv.subtitle ?? '',
       workspacePath: conv.workspacePath ?? '',
+      projectName: conv.projectName ?? '',
+      model: conv.model ?? '',
+      mode: conv.mode ?? '',
       createdAt: conv.createdAt ?? '',
       updatedAt: conv.updatedAt ?? '',
       messageCount: conv.messageCount,
@@ -130,6 +137,9 @@ export const conversationRepo = {
       title: row.title as string,
       subtitle: (row.subtitle as string) || undefined,
       workspacePath: (row.workspacePath as string) || undefined,
+      projectName: (row.projectName as string) || undefined,
+      model: (row.model as string) || undefined,
+      mode: (row.mode as string) || undefined,
       createdAt: (row.createdAt as string) || undefined,
       updatedAt: (row.updatedAt as string) || undefined,
       messageCount: row.messageCount as number,
@@ -157,6 +167,9 @@ export const conversationRepo = {
       title: row.title as string,
       subtitle: (row.subtitle as string) || undefined,
       workspacePath: (row.workspacePath as string) || undefined,
+      projectName: (row.projectName as string) || undefined,
+      model: (row.model as string) || undefined,
+      mode: (row.mode as string) || undefined,
       createdAt: (row.createdAt as string) || undefined,
       updatedAt: (row.updatedAt as string) || undefined,
       messageCount: row.messageCount as number,
@@ -333,6 +346,100 @@ export const syncStateRepo = {
         lastMtime: state.lastMtime,
       },
     ]);
+  },
+};
+
+// ============ Conversation Files Repository ============
+
+export const filesRepo = {
+  async bulkInsert(files: ConversationFile[]): Promise<void> {
+    if (files.length === 0) return;
+
+    const table = await getFilesTable();
+    const rows = files.map((f) => ({
+      id: f.id,
+      conversationId: f.conversationId,
+      filePath: f.filePath,
+      role: f.role,
+    }));
+
+    await table.add(rows);
+  },
+
+  async findByConversation(conversationId: string): Promise<ConversationFile[]> {
+    const table = await getFilesTable();
+    const allResults = await table.query().toArray();
+    const results = allResults.filter(
+      (row) => (row.conversationId as string) === conversationId
+    );
+
+    return results.map((row) => ({
+      id: row.id as string,
+      conversationId: row.conversationId as string,
+      filePath: row.filePath as string,
+      role: row.role as ConversationFile['role'],
+    }));
+  },
+
+  async deleteByConversation(conversationId: string): Promise<void> {
+    const table = await getFilesTable();
+    await table.delete(`"conversationId" = '${conversationId}'`);
+  },
+};
+
+// ============ Message Files Repository ============
+
+export const messageFilesRepo = {
+  async bulkInsert(files: MessageFile[]): Promise<void> {
+    if (files.length === 0) return;
+
+    const table = await getMessageFilesTable();
+    const rows = files.map((f) => ({
+      id: f.id,
+      messageId: f.messageId,
+      conversationId: f.conversationId,
+      filePath: f.filePath,
+      role: f.role,
+    }));
+
+    await table.add(rows);
+  },
+
+  async findByMessage(messageId: string): Promise<MessageFile[]> {
+    const table = await getMessageFilesTable();
+    const allResults = await table.query().toArray();
+    const results = allResults.filter(
+      (row) => (row.messageId as string) === messageId
+    );
+
+    return results.map((row) => ({
+      id: row.id as string,
+      messageId: row.messageId as string,
+      conversationId: row.conversationId as string,
+      filePath: row.filePath as string,
+      role: row.role as MessageFile['role'],
+    }));
+  },
+
+  async findByConversation(conversationId: string): Promise<MessageFile[]> {
+    const table = await getMessageFilesTable();
+    const allResults = await table.query().toArray();
+    const results = allResults.filter(
+      (row) => (row.conversationId as string) === conversationId
+    );
+
+    return results.map((row) => ({
+      id: row.id as string,
+      messageId: row.messageId as string,
+      conversationId: row.conversationId as string,
+      filePath: row.filePath as string,
+      role: row.role as MessageFile['role'],
+    }));
+  },
+
+  async deleteByConversation(conversationId: string): Promise<void> {
+    const table = await getMessageFilesTable();
+    await table.delete(`"conversationId" = '${conversationId}'`);
   },
 };
 

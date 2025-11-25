@@ -46,13 +46,42 @@ function ConversationRow({
   const timeStr = formatRelativeTime(conversation.updatedAt);
   const msgStr = `${conversation.messageCount} msg${conversation.messageCount !== 1 ? 's' : ''}`;
 
+  // Build project info line
+  const projectParts: string[] = [];
+  if (conversation.projectName) {
+    projectParts.push(conversation.projectName);
+  }
+  if (conversation.mode) {
+    projectParts.push(conversation.mode);
+  }
+  const projectInfo = projectParts.length > 0 ? projectParts.join(' · ') : null;
+
+  // Truncate workspace path if needed
+  const workspacePath = conversation.workspacePath;
+  const maxPathWidth = width - 6;
+  const displayPath = workspacePath
+    ? (workspacePath.length > maxPathWidth ? '…' + workspacePath.slice(-(maxPathWidth - 1)) : workspacePath)
+    : null;
+
   return (
-    <Box>
-      <Text color={isSelected ? 'cyan' : 'white'} bold={isSelected}>
-        {isSelected ? '▸ ' : '  '}
-        {title}
-      </Text>
-      <Text dimColor> · {msgStr} · {timeStr}</Text>
+    <Box flexDirection="column">
+      <Box>
+        <Text color={isSelected ? 'cyan' : 'white'} bold={isSelected}>
+          {isSelected ? '▸ ' : '  '}
+          {title}
+        </Text>
+        <Text dimColor> · {msgStr} · {timeStr}</Text>
+      </Box>
+      {projectInfo && (
+        <Box marginLeft={4}>
+          <Text color="yellow" dimColor>{projectInfo}</Text>
+        </Box>
+      )}
+      {isSelected && displayPath && (
+        <Box marginLeft={4}>
+          <Text dimColor>{displayPath}</Text>
+        </Box>
+      )}
     </Box>
   );
 }
@@ -88,9 +117,9 @@ function ListApp({
 
   const headerHeight = 3;
   const footerHeight = 2;
-  const rowHeight = 1;
+  const rowHeight = 2; // Title + optional project info
   const availableHeight = height - headerHeight - footerHeight;
-  const visibleCount = Math.max(1, availableHeight);
+  const visibleCount = Math.max(1, Math.floor(availableHeight / rowHeight));
 
   const scrollOffset = useMemo(() => {
     const maxOffset = Math.max(0, conversations.length - visibleCount);
@@ -211,6 +240,15 @@ async function plainList(limit: number, source?: string): Promise<void> {
 
   for (const conv of conversations) {
     console.log(`${conv.title} [${conv.source}]`);
+    const projectParts: string[] = [];
+    if (conv.projectName) projectParts.push(conv.projectName);
+    if (conv.mode) projectParts.push(conv.mode);
+    if (projectParts.length > 0) {
+      console.log(`   ${projectParts.join(' · ')}`);
+    }
+    if (conv.workspacePath) {
+      console.log(`   ${conv.workspacePath}`);
+    }
     console.log(`   ${conv.messageCount} message(s) · ${formatRelativeTime(conv.updatedAt)}`);
     console.log(`   ID: ${conv.id}`);
     console.log('');

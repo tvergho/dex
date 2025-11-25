@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { getCursorGlobalDbPath, getGlobalDatabase } from './paths.js';
 import { extractConversations, type RawConversation } from './parser.js';
-import type { Conversation, Message, SourceRef, ToolCall } from '../../schema/index.js';
+import type { Conversation, Message, SourceRef, ToolCall, ConversationFile, MessageFile } from '../../schema/index.js';
 import type { SourceAdapter, SourceLocation, NormalizedConversation } from '../types.js';
 
 export class CursorAdapter implements SourceAdapter {
@@ -69,7 +69,10 @@ export class CursorAdapter implements SourceAdapter {
       source: 'cursor',
       title: raw.name || 'Untitled',
       subtitle: undefined,
-      workspacePath: undefined,
+      workspacePath: raw.workspacePath,
+      projectName: raw.projectName,
+      model: raw.model,
+      mode: raw.mode,
       createdAt,
       updatedAt,
       messageCount: raw.bubbles.length,
@@ -88,6 +91,34 @@ export class CursorAdapter implements SourceAdapter {
       };
     });
 
+    // Build conversation files
+    const files: ConversationFile[] = raw.files.map((file, index) => ({
+      id: `${conversationId}:file:${index}`,
+      conversationId,
+      filePath: file.path,
+      role: file.role,
+    }));
+
+    // Build message files (per-message file associations)
+    const messageFiles: MessageFile[] = [];
+    for (let i = 0; i < raw.bubbles.length; i++) {
+      const bubble = raw.bubbles[i];
+      if (!bubble) continue;
+      const messageId = `${conversationId}:${bubble.bubbleId}`;
+
+      for (let j = 0; j < bubble.files.length; j++) {
+        const file = bubble.files[j];
+        if (!file) continue;
+        messageFiles.push({
+          id: `${messageId}:file:${j}`,
+          messageId,
+          conversationId,
+          filePath: file.path,
+          role: file.role,
+        });
+      }
+    }
+
     // Tool calls - not implemented yet
     const toolCalls: ToolCall[] = [];
 
@@ -95,6 +126,8 @@ export class CursorAdapter implements SourceAdapter {
       conversation,
       messages,
       toolCalls,
+      files,
+      messageFiles,
     };
   }
 

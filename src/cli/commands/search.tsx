@@ -2,12 +2,14 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { render, Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index.js';
-import { search } from '../../db/repository.js';
-import type { SearchResponse, ConversationResult, MessageMatch } from '../../schema/index.js';
+import { search, conversationRepo, messageRepo, filesRepo, messageFilesRepo } from '../../db/repository.js';
+import type { SearchResponse, ConversationResult, MessageMatch, Conversation, Message, ConversationFile, MessageFile } from '../../schema/index.js';
 
 interface SearchOptions {
   limit?: string;
 }
+
+type ViewMode = 'list' | 'matches' | 'conversation';
 
 function formatRelativeTime(isoDate: string | undefined): string {
   if (!isoDate) return '';
@@ -25,14 +27,50 @@ function formatRelativeTime(isoDate: string | undefined): string {
   return `${Math.floor(diffDays / 365)}y ago`;
 }
 
+// Render text with highlighted search terms
+function HighlightedText({
+  text,
+  query,
+  dimColor,
+}: {
+  text: string;
+  query: string;
+  dimColor?: boolean;
+}) {
+  const terms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 0);
+  if (terms.length === 0) {
+    return <Text dimColor={dimColor}>{text}</Text>;
+  }
+
+  // Build regex to match any term
+  const escapedTerms = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
+
+  const parts = text.split(regex);
+
+  return (
+    <Text dimColor={dimColor}>
+      {parts.map((part, i) => {
+        const isMatch = terms.some((t) => part.toLowerCase() === t);
+        if (isMatch) {
+          return <Text key={i} color="yellow" bold>{part}</Text>;
+        }
+        return <Text key={i}>{part}</Text>;
+      })}
+    </Text>
+  );
+}
+
 function ResultRow({
   result,
   isSelected,
   width,
+  query,
 }: {
   result: ConversationResult;
   isSelected: boolean;
   width: number;
+  query: string;
 }) {
   const { conversation, bestMatch, totalMatches } = result;
 
@@ -47,6 +85,25 @@ function ResultRow({
   const timeStr = formatRelativeTime(conversation.updatedAt);
   const matchStr = `${totalMatches} match${totalMatches !== 1 ? 'es' : ''}`;
 
+  // Build project info line
+  const projectParts: string[] = [];
+  if (conversation.projectName) {
+    projectParts.push(conversation.projectName);
+  }
+  if (conversation.mode) {
+    projectParts.push(conversation.mode);
+  }
+  const projectInfo = projectParts.length > 0 ? projectParts.join(' · ') : null;
+
+  // Truncate workspace path if needed
+  const workspacePath = conversation.workspacePath;
+  const maxPathWidth = width - 6;
+  const displayPath = workspacePath
+    ? (workspacePath.length > maxPathWidth ? '…' + workspacePath.slice(-(maxPathWidth - 1)) : workspacePath)
+    : null;
+
+  const snippetText = bestMatch.snippet.replace(/\n/g, ' ').slice(0, width - 6);
+
   return (
     <Box flexDirection="column">
       <Box>
@@ -56,31 +113,69 @@ function ResultRow({
         </Text>
         <Text dimColor> · {matchStr} · {timeStr}</Text>
       </Box>
+      {projectInfo && (
+        <Box marginLeft={4}>
+          <Text color="yellow" dimColor>{projectInfo}</Text>
+        </Box>
+      )}
+      {displayPath && (
+        <Box marginLeft={4}>
+          <Text color="magenta">{displayPath}</Text>
+        </Box>
+      )}
       <Box marginLeft={4}>
-        <Text dimColor wrap="truncate-end">
-          {bestMatch.snippet.replace(/\n/g, ' ').slice(0, width - 6)}
-        </Text>
+        <HighlightedText text={snippetText} query={query} dimColor />
       </Box>
     </Box>
   );
 }
 
-function ExpandedView({
+function MatchesView({
   result,
+  files,
+  messageFiles,
   width,
   height,
   scrollOffset,
   selectedMatchIndex,
+  query,
 }: {
   result: ConversationResult;
+  files: ConversationFile[];
+  messageFiles: MessageFile[];
   width: number;
   height: number;
   scrollOffset: number;
   selectedMatchIndex: number;
+  query: string;
 }) {
   const { conversation, matches } = result;
 
-  const headerHeight = 3;
+  // Build project context info
+  const projectParts: string[] = [];
+  if (conversation.projectName) {
+    projectParts.push(conversation.projectName);
+  } else if (conversation.workspacePath) {
+    // Extract last part of workspace path as project name
+    const parts = conversation.workspacePath.split('/').filter(Boolean);
+    if (parts.length > 0) {
+      projectParts.push(parts[parts.length - 1]!);
+    }
+  }
+  if (conversation.mode) {
+    projectParts.push(conversation.mode);
+  }
+  if (conversation.model) {
+    projectParts.push(conversation.model);
+  }
+
+  // Get unique file names (just the filename, not full path)
+  const fileNames = files.slice(0, 5).map((f) => {
+    const parts = f.filePath.split('/');
+    return parts[parts.length - 1] || f.filePath;
+  });
+
+  const headerHeight = files.length > 0 ? 6 : 4;
   const availableHeight = height - headerHeight;
   const matchesPerPage = Math.max(1, Math.floor(availableHeight / 4));
 
@@ -88,19 +183,39 @@ function ExpandedView({
 
   return (
     <Box flexDirection="column" height={height}>
-      {/* Header */}
       <Box flexDirection="column" marginBottom={1}>
         <Text bold color="cyan">{conversation.title}</Text>
+        {projectParts.length > 0 && (
+          <Text color="yellow">{projectParts.join(' · ')}</Text>
+        )}
+        {conversation.workspacePath && (
+          <Text color="magenta">
+            {conversation.workspacePath.length > width - 4
+              ? '…' + conversation.workspacePath.slice(-(width - 7))
+              : conversation.workspacePath}
+          </Text>
+        )}
+        {fileNames.length > 0 && (
+          <Text dimColor>
+            Files: {fileNames.join(', ')}{files.length > 5 ? ` (+${files.length - 5} more)` : ''}
+          </Text>
+        )}
         <Text dimColor>
-          {matches.length} match{matches.length !== 1 ? 'es' : ''} · ID: {conversation.id.slice(0, 16)}…
+          {matches.length} match{matches.length !== 1 ? 'es' : ''}
         </Text>
       </Box>
 
-      {/* Matches */}
       <Box flexDirection="column" flexGrow={1}>
         {visibleMatches.map((match, idx) => {
           const actualIdx = scrollOffset + idx;
           const isSelected = actualIdx === selectedMatchIndex;
+
+          // Get files for this message
+          const msgFiles = messageFiles.filter((f) => f.messageId === match.messageId);
+          const msgFileNames = msgFiles.map((f) => {
+            const parts = f.filePath.split('/');
+            return parts[parts.length - 1] || f.filePath;
+          });
 
           return (
             <Box
@@ -115,22 +230,145 @@ function ExpandedView({
                 <Text color={match.role === 'user' ? 'green' : 'blue'} bold>
                   {match.role === 'user' ? 'You' : 'Assistant'}
                 </Text>
-                <Text dimColor> (message {match.messageIndex + 1})</Text>
+                {msgFileNames.length > 0 && (
+                  <Text dimColor> ({msgFileNames.join(', ')})</Text>
+                )}
+                <Text dimColor> · msg {match.messageIndex + 1}</Text>
               </Text>
-              <Text wrap="truncate-end">
-                {match.snippet.replace(/\n/g, ' ').slice(0, width - 6)}
-              </Text>
+              <HighlightedText
+                text={match.snippet.replace(/\n/g, ' ').slice(0, width - 6)}
+                query={query}
+              />
             </Box>
           );
         })}
       </Box>
 
-      {/* Scroll indicator */}
       {matches.length > matchesPerPage && (
         <Text dimColor>
           {scrollOffset + 1}-{Math.min(scrollOffset + matchesPerPage, matches.length)} of {matches.length}
         </Text>
       )}
+    </Box>
+  );
+}
+
+function ConversationView({
+  conversation,
+  messages,
+  files,
+  messageFiles,
+  width,
+  height,
+  scrollOffset,
+  highlightMessageIndex,
+}: {
+  conversation: Conversation;
+  messages: Message[];
+  files: ConversationFile[];
+  messageFiles: MessageFile[];
+  width: number;
+  height: number;
+  scrollOffset: number;
+  highlightMessageIndex?: number;
+}) {
+  // Build project context info
+  const projectParts: string[] = [];
+  if (conversation.projectName) {
+    projectParts.push(conversation.projectName);
+  } else if (conversation.workspacePath) {
+    const parts = conversation.workspacePath.split('/').filter(Boolean);
+    if (parts.length > 0) {
+      projectParts.push(parts[parts.length - 1]!);
+    }
+  }
+  if (conversation.mode) {
+    projectParts.push(conversation.mode);
+  }
+  if (conversation.model) {
+    projectParts.push(conversation.model);
+  }
+
+  // Get file names
+  const fileNames = files.slice(0, 5).map((f) => {
+    const parts = f.filePath.split('/');
+    return parts[parts.length - 1] || f.filePath;
+  });
+
+  // Header: title + project info + workspace path + files (optional) + message count
+  const headerHeight = 4 + (files.length > 0 ? 1 : 0);
+  const availableHeight = height - headerHeight;
+  const messagesPerPage = Math.max(1, Math.floor(availableHeight / 5));
+
+  const visibleMessages = messages.slice(scrollOffset, scrollOffset + messagesPerPage);
+
+  return (
+    <Box flexDirection="column" height={height}>
+      <Box flexDirection="column" marginBottom={1}>
+        <Text bold color="cyan">{conversation.title}</Text>
+        {projectParts.length > 0 && (
+          <Text color="yellow">{projectParts.join(' · ')}</Text>
+        )}
+        {conversation.workspacePath && (
+          <Text color="magenta">
+            {conversation.workspacePath.length > width - 4
+              ? '…' + conversation.workspacePath.slice(-(width - 7))
+              : conversation.workspacePath}
+          </Text>
+        )}
+        {fileNames.length > 0 && (
+          <Text dimColor>
+            Files: {fileNames.join(', ')}{files.length > 5 ? ` (+${files.length - 5} more)` : ''}
+          </Text>
+        )}
+        <Text dimColor>
+          {messages.length} message{messages.length !== 1 ? 's' : ''}
+          {messages.length > messagesPerPage && ` · ${scrollOffset + 1}-${Math.min(scrollOffset + messagesPerPage, messages.length)} of ${messages.length}`}
+        </Text>
+      </Box>
+
+      <Box flexDirection="column" flexGrow={1}>
+        {visibleMessages.map((msg, idx) => {
+          const actualIdx = scrollOffset + idx;
+          const isHighlighted = actualIdx === highlightMessageIndex;
+          const roleLabel = msg.role === 'user' ? 'You' : msg.role === 'assistant' ? 'Assistant' : 'System';
+          const roleColor = msg.role === 'user' ? 'green' : msg.role === 'assistant' ? 'blue' : 'yellow';
+
+          // Get files for this message
+          const msgFiles = messageFiles.filter((f) => f.messageId === msg.id);
+          const msgFileNames = msgFiles.map((f) => {
+            const parts = f.filePath.split('/');
+            return parts[parts.length - 1] || f.filePath;
+          });
+
+          // Truncate long messages
+          const maxLen = width * 3;
+          const content = msg.content.length > maxLen
+            ? msg.content.slice(0, maxLen) + '…'
+            : msg.content;
+
+          return (
+            <Box
+              key={msg.id}
+              flexDirection="column"
+              marginBottom={1}
+              borderStyle={isHighlighted ? 'single' : undefined}
+              borderColor="yellow"
+              paddingLeft={isHighlighted ? 1 : 0}
+            >
+              <Box>
+                <Text color={roleColor} bold>[{roleLabel}]</Text>
+                {msgFileNames.length > 0 && (
+                  <Text dimColor> ({msgFileNames.join(', ')})</Text>
+                )}
+              </Box>
+              <Box marginLeft={2}>
+                <Text wrap="wrap">{content.replace(/\n/g, ' ').slice(0, width * 2)}</Text>
+              </Box>
+            </Box>
+          );
+        })}
+      </Box>
     </Box>
   );
 }
@@ -144,13 +382,25 @@ function SearchApp({
 }) {
   const { exit } = useApp();
   const { width, height } = useScreenSize();
+
+  // Search state
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [response, setResponse] = useState<SearchResponse | null>(null);
+
+  // Navigation state
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
   const [expandedScrollOffset, setExpandedScrollOffset] = useState(0);
   const [expandedSelectedMatch, setExpandedSelectedMatch] = useState(0);
+
+  // Conversation view state
+  const [conversationMessages, setConversationMessages] = useState<Message[]>([]);
+  const [conversationFiles, setConversationFiles] = useState<ConversationFile[]>([]);
+  const [conversationMessageFiles, setConversationMessageFiles] = useState<MessageFile[]>([]);
+  const [conversationScrollOffset, setConversationScrollOffset] = useState(0);
+  const [highlightMessageIndex, setHighlightMessageIndex] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     async function runSearch() {
@@ -166,6 +416,18 @@ function SearchApp({
     }
     runSearch();
   }, [query, limit]);
+
+  // Load files when expanding a conversation
+  useEffect(() => {
+    if (expandedIndex !== null && response?.results[expandedIndex]) {
+      const convId = response.results[expandedIndex]!.conversation.id;
+      filesRepo.findByConversation(convId).then(setConversationFiles);
+      messageFilesRepo.findByConversation(convId).then(setConversationMessageFiles);
+    } else {
+      setConversationFiles([]);
+      setConversationMessageFiles([]);
+    }
+  }, [expandedIndex, response]);
 
   const headerHeight = 3;
   const footerHeight = 2;
@@ -185,8 +447,24 @@ function SearchApp({
     return response.results.slice(scrollOffset, scrollOffset + visibleCount);
   }, [response, scrollOffset, visibleCount]);
 
-  const isExpanded = expandedIndex !== null;
-  const expandedResult = isExpanded ? response?.results[expandedIndex] : null;
+  const expandedResult = expandedIndex !== null ? response?.results[expandedIndex] : null;
+
+  // Load conversation messages when entering conversation view
+  const loadConversation = async (conversationId: string, targetMessageIndex?: number) => {
+    const msgs = await messageRepo.findByConversation(conversationId);
+    setConversationMessages(msgs);
+
+    // Scroll to show the highlighted message
+    if (targetMessageIndex !== undefined) {
+      const messagesPerPage = Math.max(1, Math.floor((height - 8) / 5));
+      const targetScroll = Math.max(0, targetMessageIndex - Math.floor(messagesPerPage / 2));
+      setConversationScrollOffset(Math.min(targetScroll, Math.max(0, msgs.length - messagesPerPage)));
+      setHighlightMessageIndex(targetMessageIndex);
+    } else {
+      setConversationScrollOffset(0);
+      setHighlightMessageIndex(undefined);
+    }
+  };
 
   useInput((input, key) => {
     if (input === 'q') {
@@ -196,33 +474,57 @@ function SearchApp({
 
     if (!response || response.results.length === 0) return;
 
-    if (isExpanded && expandedResult) {
-      // Expanded view navigation
+    if (viewMode === 'conversation' && expandedResult) {
+      // Conversation view navigation
       if (key.escape || key.backspace || key.delete) {
-        // Close expanded view
+        setViewMode('matches');
+        setConversationMessages([]);
+        setHighlightMessageIndex(undefined);
+      } else if (input === 'j' || key.downArrow) {
+        const messagesPerPage = Math.max(1, Math.floor((height - 8) / 5));
+        const maxOffset = Math.max(0, conversationMessages.length - messagesPerPage);
+        setConversationScrollOffset((o) => Math.min(o + 1, maxOffset));
+      } else if (input === 'k' || key.upArrow) {
+        setConversationScrollOffset((o) => Math.max(o - 1, 0));
+      } else if (input === 'g') {
+        setConversationScrollOffset(0);
+      } else if (input === 'G') {
+        const messagesPerPage = Math.max(1, Math.floor((height - 8) / 5));
+        setConversationScrollOffset(Math.max(0, conversationMessages.length - messagesPerPage));
+      }
+    } else if (viewMode === 'matches' && expandedResult) {
+      // Matches view navigation
+      if (key.escape || key.backspace || key.delete) {
+        setViewMode('list');
         setExpandedIndex(null);
         setExpandedScrollOffset(0);
         setExpandedSelectedMatch(0);
       } else if (input === 'j' || key.downArrow) {
-        // Navigate within matches
         const maxIdx = expandedResult.matches.length - 1;
-        setExpandedSelectedMatch((i) => Math.min(i + 1, maxIdx));
-        // Adjust scroll if needed
-        const matchesPerPage = Math.max(1, Math.floor((height - 8) / 4));
-        if (expandedSelectedMatch >= expandedScrollOffset + matchesPerPage - 1) {
-          setExpandedScrollOffset((o) => Math.min(o + 1, Math.max(0, expandedResult.matches.length - matchesPerPage)));
-        }
+        setExpandedSelectedMatch((i) => {
+          const newIdx = Math.min(i + 1, maxIdx);
+          // Adjust scroll if needed
+          const matchesPerPage = Math.max(1, Math.floor((height - 8) / 4));
+          if (newIdx >= expandedScrollOffset + matchesPerPage) {
+            setExpandedScrollOffset((o) => Math.min(o + 1, Math.max(0, expandedResult.matches.length - matchesPerPage)));
+          }
+          return newIdx;
+        });
       } else if (input === 'k' || key.upArrow) {
-        setExpandedSelectedMatch((i) => Math.max(i - 1, 0));
-        if (expandedSelectedMatch <= expandedScrollOffset) {
-          setExpandedScrollOffset((o) => Math.max(o - 1, 0));
-        }
+        setExpandedSelectedMatch((i) => {
+          const newIdx = Math.max(i - 1, 0);
+          if (newIdx < expandedScrollOffset) {
+            setExpandedScrollOffset((o) => Math.max(o - 1, 0));
+          }
+          return newIdx;
+        });
       } else if (key.return) {
-        // Could open full conversation here in future
-        // For now, just close
-        setExpandedIndex(null);
-        setExpandedScrollOffset(0);
-        setExpandedSelectedMatch(0);
+        // Open full conversation view, scrolled to the selected match
+        const selectedMatch = expandedResult.matches[expandedSelectedMatch];
+        if (selectedMatch) {
+          setViewMode('conversation');
+          loadConversation(expandedResult.conversation.id, selectedMatch.messageIndex);
+        }
       }
     } else {
       // List view navigation
@@ -231,6 +533,7 @@ function SearchApp({
       } else if (input === 'k' || key.upArrow) {
         setSelectedIndex((i) => Math.max(i - 1, 0));
       } else if (key.return || input === 'o') {
+        setViewMode('matches');
         setExpandedIndex(selectedIndex);
         setExpandedScrollOffset(0);
         setExpandedSelectedMatch(0);
@@ -263,6 +566,14 @@ function SearchApp({
     );
   }
 
+  // Determine footer text based on view mode
+  let footerText = 'j/k: navigate · Enter: expand · q: quit';
+  if (viewMode === 'matches') {
+    footerText = 'j/k: navigate · Enter: view conversation · Esc: back · q: quit';
+  } else if (viewMode === 'conversation') {
+    footerText = 'j/k: scroll · g/G: top/bottom · Esc: back · q: quit';
+  }
+
   return (
     <Box width={width} height={height} flexDirection="column">
       {/* Header */}
@@ -279,13 +590,27 @@ function SearchApp({
       <Box flexDirection="column" flexGrow={1} paddingX={1}>
         {response.results.length === 0 ? (
           <Text dimColor>No results found.</Text>
-        ) : isExpanded && expandedResult ? (
-          <ExpandedView
+        ) : viewMode === 'conversation' && expandedResult ? (
+          <ConversationView
+            conversation={expandedResult.conversation}
+            messages={conversationMessages}
+            files={conversationFiles}
+            messageFiles={conversationMessageFiles}
+            width={width - 2}
+            height={availableHeight}
+            scrollOffset={conversationScrollOffset}
+            highlightMessageIndex={highlightMessageIndex}
+          />
+        ) : viewMode === 'matches' && expandedResult ? (
+          <MatchesView
             result={expandedResult}
+            files={conversationFiles}
+            messageFiles={conversationMessageFiles}
             width={width - 2}
             height={availableHeight}
             scrollOffset={expandedScrollOffset}
             selectedMatchIndex={expandedSelectedMatch}
+            query={query}
           />
         ) : (
           visibleResults.map((result, idx) => {
@@ -296,6 +621,7 @@ function SearchApp({
                   result={result}
                   isSelected={actualIndex === selectedIndex}
                   width={width - 2}
+                  query={query}
                 />
               </Box>
             );
@@ -304,7 +630,7 @@ function SearchApp({
       </Box>
 
       {/* Scroll indicator for list view */}
-      {!isExpanded && response.results.length > visibleCount && (
+      {viewMode === 'list' && response.results.length > visibleCount && (
         <Box paddingX={1}>
           <Text dimColor>
             {scrollOffset + 1}-{Math.min(scrollOffset + visibleCount, response.results.length)} of {response.results.length}
@@ -314,12 +640,7 @@ function SearchApp({
 
       {/* Footer */}
       <Box paddingX={1} marginTop={1}>
-        <Text dimColor>
-          {isExpanded
-            ? 'j/k: navigate matches · Esc: back · q: quit'
-            : 'j/k: navigate · Enter: expand · q: quit'
-          }
-        </Text>
+        <Text dimColor>{footerText}</Text>
       </Box>
     </Box>
   );
@@ -341,6 +662,15 @@ async function plainSearch(query: string, limit: number): Promise<void> {
 
   for (const r of result.results) {
     console.log(`${r.conversation.title} [${r.conversation.source}]`);
+    const projectParts: string[] = [];
+    if (r.conversation.projectName) projectParts.push(r.conversation.projectName);
+    if (r.conversation.mode) projectParts.push(r.conversation.mode);
+    if (projectParts.length > 0) {
+      console.log(`   ${projectParts.join(' · ')}`);
+    }
+    if (r.conversation.workspacePath) {
+      console.log(`   ${r.conversation.workspacePath}`);
+    }
     console.log(`   ${r.totalMatches} match(es) · ${formatRelativeTime(r.conversation.updatedAt)}`);
     console.log(`   "${r.bestMatch.snippet.replace(/\n/g, ' ').slice(0, 100)}${r.bestMatch.snippet.length > 100 ? '...' : ''}"`);
     console.log(`   ID: ${r.conversation.id}`);
