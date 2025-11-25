@@ -45,12 +45,18 @@ interface BubbleData {
   context?: ContextData;
 }
 
+interface ModelConfig {
+  modelName?: string;
+  maxMode?: boolean;
+}
+
 interface ComposerDataEntry {
   composerId: string;
   name?: string;
   createdAt?: number;
   lastUpdatedAt?: number;
   forceMode?: string; // 'chat', 'edit', 'agent'
+  modelConfig?: ModelConfig; // Available in schema v9+ (April 2025+)
   context?: ContextData;
   conversation?: BubbleData[];
   conversationMap?: Record<string, BubbleData>;
@@ -253,6 +259,45 @@ export function extractConversations(dbPath: string): RawConversation[] {
         }
       }
 
+      // Try to get bubbles from separate bubbleId entries (newest format - v9+)
+      // In this format, conversationMap is empty but bubbles are stored as separate entries
+      if (bubbles.length === 0 && data.fullConversationHeadersOnly && data.fullConversationHeadersOnly.length > 0) {
+        for (const header of data.fullConversationHeadersOnly) {
+          if (header.bubbleId) {
+            // Look up bubble from separate bubbleId entry
+            const bubbleKey = `bubbleId:${composerId}:${header.bubbleId}`;
+            try {
+              const bubbleRow = db
+                .prepare('SELECT value FROM cursorDiskKV WHERE key = ?')
+                .get(bubbleKey) as { value: Buffer | string } | undefined;
+
+              if (bubbleRow) {
+                let bubbleStr: string;
+                if (Buffer.isBuffer(bubbleRow.value)) {
+                  bubbleStr = bubbleRow.value.toString('utf-8');
+                } else {
+                  bubbleStr = bubbleRow.value;
+                }
+
+                const bubbleData = JSON.parse(bubbleStr) as BubbleData;
+                if (bubbleData && bubbleData.text) {
+                  const bubbleFiles = extractBubbleFiles(bubbleData);
+                  bubbles.push({
+                    bubbleId: header.bubbleId,
+                    type: mapBubbleType(header.type ?? bubbleData.type),
+                    text: bubbleData.text,
+                    files: bubbleFiles,
+                  });
+                  bubbleDataList.push(bubbleData);
+                }
+              }
+            } catch {
+              // Skip invalid bubble entries
+            }
+          }
+        }
+      }
+
       // Skip empty conversations
       if (bubbles.length === 0) continue;
 
@@ -273,6 +318,7 @@ export function extractConversations(dbPath: string): RawConversation[] {
         workspacePath,
         projectName,
         mode: data.forceMode,
+        model: data.modelConfig?.modelName,
         files,
       });
     }

@@ -54,6 +54,9 @@ function ConversationRow({
   if (conversation.mode) {
     projectParts.push(conversation.mode);
   }
+  if (conversation.model) {
+    projectParts.push(conversation.model);
+  }
   const projectInfo = projectParts.length > 0 ? projectParts.join(' · ') : null;
 
   // Truncate workspace path if needed
@@ -243,6 +246,7 @@ async function plainList(limit: number, source?: string): Promise<void> {
     const projectParts: string[] = [];
     if (conv.projectName) projectParts.push(conv.projectName);
     if (conv.mode) projectParts.push(conv.mode);
+    if (conv.model) projectParts.push(conv.model);
     if (projectParts.length > 0) {
       console.log(`   ${projectParts.join(' · ')}`);
     }
