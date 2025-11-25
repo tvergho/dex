@@ -177,7 +177,7 @@ function MatchesView({
 
   const headerHeight = files.length > 0 ? 6 : 4;
   const availableHeight = height - headerHeight;
-  const matchesPerPage = Math.max(1, Math.floor(availableHeight / 4));
+  const matchesPerPage = Math.max(1, Math.floor(availableHeight / 2));
 
   const visibleMatches = matches.slice(scrollOffset, scrollOffset + matchesPerPage);
 
@@ -217,28 +217,28 @@ function MatchesView({
             return parts[parts.length - 1] || f.filePath;
           });
 
+          const roleColor = match.role === 'user' ? 'green' : 'blue';
+
           return (
             <Box
               key={match.messageId}
               flexDirection="column"
-              marginBottom={1}
-              paddingLeft={1}
-              borderStyle={isSelected ? 'single' : undefined}
-              borderColor="cyan"
+              marginBottom={0}
             >
-              <Text>
-                <Text color={match.role === 'user' ? 'green' : 'blue'} bold>
-                  {match.role === 'user' ? 'You' : 'Assistant'}
+              <Box>
+                <Text backgroundColor={isSelected ? 'cyan' : undefined} color={isSelected ? 'black' : roleColor} bold>
+                  {isSelected ? ' ▸ ' : '   '}{match.role === 'user' ? 'You' : 'Assistant'}
                 </Text>
                 {msgFileNames.length > 0 && (
-                  <Text dimColor> ({msgFileNames.join(', ')})</Text>
+                  <Text dimColor={!isSelected}> ({msgFileNames.join(', ')})</Text>
                 )}
-                <Text dimColor> · msg {match.messageIndex + 1}</Text>
-              </Text>
-              <Box>
+                <Text dimColor={!isSelected}> · msg {match.messageIndex + 1}</Text>
+              </Box>
+              <Box marginLeft={5}>
                 <HighlightedText
-                  text={match.content.replace(/\n/g, ' ').slice(0, (width - 6) * 3)}
+                  text={match.content.replace(/\n/g, ' ').slice(0, width - 8)}
                   query={query}
+                  dimColor={!isSelected}
                 />
               </Box>
             </Box>
@@ -302,7 +302,7 @@ function ConversationView({
   // Header: title + project info + workspace path + files (optional) + message count
   const headerHeight = 4 + (files.length > 0 ? 1 : 0);
   const availableHeight = height - headerHeight;
-  const messagesPerPage = Math.max(1, Math.floor(availableHeight / 5));
+  const messagesPerPage = Math.max(1, Math.floor(availableHeight / 3));
 
   const visibleMessages = messages.slice(scrollOffset, scrollOffset + messagesPerPage);
 
@@ -346,33 +346,37 @@ function ConversationView({
             return parts[parts.length - 1] || f.filePath;
           });
 
-          // Truncate messages to ~2 lines for compact view
-          const maxLen = (width - 6) * 2;
+          // Truncate messages to ~2 lines for readable view
+          const maxLen = (width - 8) * 2;
           const truncatedContent = msg.content.replace(/\n/g, ' ').slice(0, maxLen);
           const isTruncated = msg.content.length > maxLen;
+
+          // Determine visual state
+          const bgColor = isSelected ? 'cyan' : isHighlighted ? 'yellow' : undefined;
+          const textColor = isSelected || isHighlighted ? 'black' : roleColor;
 
           return (
             <Box
               key={msg.id}
               flexDirection="column"
               marginBottom={1}
-              borderStyle={isSelected ? 'single' : isHighlighted ? 'single' : undefined}
-              borderColor={isSelected ? 'cyan' : 'yellow'}
-              paddingLeft={isSelected || isHighlighted ? 1 : 0}
             >
               <Box>
-                <Text color={isSelected ? 'cyan' : roleColor} bold>
-                  {isSelected ? '▸ ' : ''}[{roleLabel}]
+                <Text backgroundColor={bgColor} color={textColor} bold>
+                  {isSelected ? ' ▸ ' : isHighlighted ? ' ★ ' : '   '}[{roleLabel}]
                 </Text>
                 {msgFileNames.length > 0 && (
-                  <Text dimColor> ({msgFileNames.join(', ')})</Text>
+                  <Text dimColor={!isSelected && !isHighlighted}> ({msgFileNames.join(', ')})</Text>
                 )}
-                {isTruncated && (
-                  <Text dimColor> [Enter for full]</Text>
+                {isHighlighted && !isSelected && (
+                  <Text color="yellow"> (matched)</Text>
+                )}
+                {isTruncated && isSelected && (
+                  <Text color="cyan"> ↵</Text>
                 )}
               </Box>
-              <Box marginLeft={2}>
-                <Text wrap="wrap">{truncatedContent}{isTruncated ? '…' : ''}</Text>
+              <Box marginLeft={5}>
+                <Text dimColor={!isSelected && !isHighlighted} wrap="wrap">{truncatedContent}{isTruncated ? '…' : ''}</Text>
               </Box>
             </Box>
           );
@@ -523,15 +527,17 @@ function SearchApp({
     const msgs = await messageRepo.findByConversation(conversationId);
     setConversationMessages(msgs);
 
-    // Scroll to show the highlighted message
+    // Scroll to show the highlighted message and select it
     if (targetMessageIndex !== undefined) {
-      const messagesPerPage = Math.max(1, Math.floor((height - 8) / 5));
+      const messagesPerPage = Math.max(1, Math.floor((height - 8) / 3));
       const targetScroll = Math.max(0, targetMessageIndex - Math.floor(messagesPerPage / 2));
       setConversationScrollOffset(Math.min(targetScroll, Math.max(0, msgs.length - messagesPerPage)));
       setHighlightMessageIndex(targetMessageIndex);
+      setSelectedMessageIndex(targetMessageIndex); // Also select the matching message
     } else {
       setConversationScrollOffset(0);
       setHighlightMessageIndex(undefined);
+      setSelectedMessageIndex(0);
     }
   };
 
