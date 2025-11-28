@@ -1,7 +1,14 @@
 import { getLlama, LlamaEmbeddingContext, LlamaModel } from 'node-llama-cpp';
 import { existsSync, mkdirSync, createWriteStream, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { cpus } from 'os';
 import { getDataDir } from '../utils/config';
+
+// Throttling settings for background embedding
+// Use only 25% of CPU cores (minimum 1) to minimize user impact
+const LOW_PRIORITY_THREADS = Math.max(1, Math.floor(cpus().length * 0.25));
+// Small batch size for less CPU burst
+const EMBEDDING_BATCH_SIZE = 64;
 
 // Embedding progress state
 export interface EmbeddingProgress {
@@ -101,7 +108,7 @@ export async function downloadModel(
   }
 }
 
-export async function initEmbeddings(): Promise<void> {
+export async function initEmbeddings(lowPriority: boolean = false): Promise<void> {
   if (embeddingContext) return;
 
   const modelPath = getModelPath();
@@ -112,9 +119,20 @@ export async function initEmbeddings(): Promise<void> {
     );
   }
 
-  llamaInstance = await getLlama();
+  // For background embedding, limit threads to minimize CPU impact
+  const threadCount = lowPriority ? LOW_PRIORITY_THREADS : undefined;
+
+  llamaInstance = await getLlama({
+    // Limit max threads for low-priority background work
+    ...(threadCount && { maxThreads: threadCount }),
+  });
   model = await llamaInstance.loadModel({ modelPath });
-  embeddingContext = await model.createEmbeddingContext();
+  embeddingContext = await model.createEmbeddingContext({
+    // Limit context threads for background work
+    ...(threadCount && { threads: threadCount }),
+    // Smaller batch size reduces CPU spikes
+    ...(lowPriority && { batchSize: EMBEDDING_BATCH_SIZE }),
+  });
 }
 
 function truncateText(text: string): string {

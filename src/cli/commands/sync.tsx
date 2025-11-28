@@ -135,8 +135,16 @@ function spawnBackgroundEmbedding(): void {
   const __dirname = dirname(__filename);
   const embedScript = join(__dirname, 'embed.ts');
 
-  // Spawn background process - detached and unref'd so it continues after parent exits
-  const child = spawn('bun', ['run', embedScript], {
+  // Spawn background process with low priority (nice 19 = lowest priority)
+  // This minimizes impact on user's foreground work
+  // On macOS/Linux, nice lowers scheduling priority; on Windows it's ignored
+  const isWindows = process.platform === 'win32';
+  const command = isWindows ? 'bun' : 'nice';
+  const args = isWindows
+    ? ['run', embedScript]
+    : ['-n', '19', 'bun', 'run', embedScript];
+
+  const child = spawn(command, args, {
     detached: true,
     stdio: 'ignore',
   });

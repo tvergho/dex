@@ -17,7 +17,10 @@ import {
 } from '../../embeddings/index.js';
 import { existsSync } from 'fs';
 
-const BATCH_SIZE = 100; // Increased from 32 as requested
+// Smaller batch size for smoother CPU usage
+const BATCH_SIZE = 50;
+// Brief pause between batches to prevent sustained high CPU
+const BATCH_DELAY_MS = 100;
 
 interface MessageRow {
   id: string;
@@ -96,7 +99,8 @@ async function runBackgroundEmbedding(): Promise<void> {
       startedAt: getEmbeddingProgress().startedAt,
     });
 
-    await initEmbeddings();
+    // Use low priority mode - limits CPU threads to minimize user impact
+    await initEmbeddings(true);
 
     const table = await getMessagesTable();
 
@@ -145,6 +149,12 @@ async function runBackgroundEmbedding(): Promise<void> {
         completed: Math.min(i + BATCH_SIZE, messages.length),
         startedAt: getEmbeddingProgress().startedAt,
       });
+
+      // Brief pause between batches to prevent sustained high CPU usage
+      // This allows other processes to get CPU time and prevents thermal throttling
+      if (i + BATCH_SIZE < messages.length) {
+        await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
+      }
     }
 
     // Rebuild both FTS and vector indexes after all updates
