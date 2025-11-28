@@ -17,10 +17,10 @@ import {
 } from '../../embeddings/index.js';
 import { existsSync } from 'fs';
 
-// Smaller batch size for smoother CPU usage
-const BATCH_SIZE = 50;
-// Brief pause between batches to prevent sustained high CPU
-const BATCH_DELAY_MS = 100;
+// Larger batch size for fewer DB writes
+const BATCH_SIZE = 100;
+// Small pause between batches - just enough to yield to other processes
+const BATCH_DELAY_MS = 50;
 
 interface MessageRow {
   id: string;
