@@ -21,7 +21,11 @@ const BATCH_SIZE = 100; // Increased from 32 as requested
 
 interface MessageRow {
   id: string;
+  conversationId: string;
+  role: string;
   content: string;
+  timestamp: string;
+  messageIndex: number;
   vector: number[] | Float32Array;
 }
 
@@ -102,25 +106,34 @@ async function runBackgroundEmbedding(): Promise<void> {
       const texts = batch.map((m) => m.content);
       const vectors = await embed(texts);
 
-      // Update each message's vector using LanceDB's update() method
-      // This preserves the FTS index (unlike delete+insert)
-      for (let j = 0; j < batch.length; j++) {
-        const msg = batch[j];
+      // Build full rows with updated vectors for batch mergeInsert
+      const updatedRows = batch.map((msg, j) => {
         const vec = vectors[j];
-        if (msg && vec) {
-          let retries = 3;
-          while (retries > 0) {
-            try {
-              await table.update({
-                where: `id = '${msg.id}'`,
-                values: { vector: vec },
-              });
-              break;
-            } catch (err) {
-              retries--;
-              if (retries === 0) throw err;
-              await new Promise((r) => setTimeout(r, 100));
-            }
+        return {
+          id: msg.id,
+          conversationId: msg.conversationId,
+          role: msg.role,
+          content: msg.content,
+          timestamp: msg.timestamp,
+          messageIndex: msg.messageIndex,
+          vector: vec ? Array.from(vec) : Array.from(msg.vector),
+        };
+      }).filter((row) => row.vector && row.vector.length > 0);
+
+      // Use mergeInsert for batch update - much more efficient than individual updates
+      // This also handles concurrent reads better
+      if (updatedRows.length > 0) {
+        let retries = 3;
+        while (retries > 0) {
+          try {
+            await table.mergeInsert('id')
+              .whenMatchedUpdateAll()
+              .execute(updatedRows);
+            break;
+          } catch (err) {
+            retries--;
+            if (retries === 0) throw err;
+            await new Promise((r) => setTimeout(r, 200));
           }
         }
       }
