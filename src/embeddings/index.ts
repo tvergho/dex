@@ -5,10 +5,10 @@ import { cpus } from 'os';
 import { getDataDir } from '../utils/config';
 
 // Throttling settings for background embedding
-// Use 50% of CPU cores (minimum 2) - balanced between speed and user impact
-const LOW_PRIORITY_THREADS = Math.max(2, Math.floor(cpus().length * 0.5));
-// Batch size for embedding context
-const EMBEDDING_BATCH_SIZE = 128;
+// Use only 25% of CPU cores (minimum 1) to minimize user impact
+const LOW_PRIORITY_THREADS = Math.max(1, Math.floor(cpus().length * 0.25));
+// Small batch size for embedding context
+const EMBEDDING_BATCH_SIZE = 64;
 
 // Embedding progress state
 export interface EmbeddingProgress {
@@ -150,11 +150,10 @@ export async function embed(texts: string[]): Promise<number[][]> {
     throw new Error('Embedding context not initialized');
   }
 
+  // Process texts sequentially - parallel Promise.all uses too much RAM
   const embeddings: number[][] = [];
   for (const text of texts) {
-    // Truncate long texts to fit context window
     const truncated = truncateText(text);
-    // Qwen3-Embedding uses instruction prefixes for best results
     const prefixed = `Instruct: Retrieve relevant code conversations\nQuery: ${truncated}`;
     const result = await embeddingContext.getEmbeddingFor(prefixed);
     embeddings.push(Array.from(result.vector));
