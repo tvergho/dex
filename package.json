@@ -21,6 +21,7 @@
     "commander": "^12.1.0",
     "fullscreen-ink": "0.1.0",
     "ink": "^5.1.0",
+    "node-llama-cpp": "3.14.2",
     "react": "^18.3.1",
     "zod": "^3.23.8"
   },

@@ -1,8 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { render, Box, Text } from 'ink';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { adapters } from '../../adapters/index.js';
 import type { SourceLocation, NormalizedConversation } from '../../adapters/types.js';
-import { connect, rebuildFtsIndex } from '../../db/index.js';
+import {
+  connect,
+  rebuildFtsIndex,
+} from '../../db/index.js';
 import {
   conversationRepo,
   messageRepo,
@@ -11,9 +17,20 @@ import {
   filesRepo,
   messageFilesRepo,
 } from '../../db/repository.js';
+import {
+  setEmbeddingProgress,
+  clearEmbeddingProgress,
+  isEmbeddingInProgress,
+} from '../../embeddings/index.js';
 
 interface SyncProgress {
-  phase: 'detecting' | 'discovering' | 'syncing' | 'indexing' | 'done' | 'error';
+  phase:
+    | 'detecting'
+    | 'discovering'
+    | 'syncing'
+    | 'indexing'
+    | 'done'
+    | 'error';
   currentSource?: string;
   currentWorkspace?: string;
   workspacesFound: number;
@@ -22,10 +39,18 @@ interface SyncProgress {
   conversationsIndexed: number;
   messagesIndexed: number;
   error?: string;
+  embeddingStarted?: boolean;
 }
 
 interface SyncOptions {
   force?: boolean;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 function SyncUI({ progress }: { progress: SyncProgress }) {
@@ -58,6 +83,11 @@ function SyncUI({ progress }: { progress: SyncProgress }) {
           {progress.workspacesProcessed} workspaces, {progress.conversationsIndexed} conversations,{' '}
           {progress.messagesIndexed} messages
         </Text>
+        {progress.embeddingStarted && (
+          <Text color="cyan">
+            Embeddings generating in background. Run "dex status" to check progress.
+          </Text>
+        )}
       </Box>
     );
   }
@@ -92,6 +122,21 @@ function SyncUI({ progress }: { progress: SyncProgress }) {
       </Box>
     </Box>
   );
+}
+
+function spawnBackgroundEmbedding(): void {
+  // Get the path to the embed script
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const embedScript = join(__dirname, 'embed.ts');
+
+  // Spawn background process - detached and unref'd so it continues after parent exits
+  const child = spawn('bun', ['run', embedScript], {
+    detached: true,
+    stdio: 'ignore',
+  });
+
+  child.unref();
 }
 
 async function runSync(
@@ -169,7 +214,7 @@ async function runSync(
           await conversationRepo.upsert(normalized.conversation);
           progress.conversationsIndexed++;
 
-          // Insert messages
+          // Insert messages (without vectors - embeddings are generated in background)
           if (normalized.messages.length > 0) {
             await messageRepo.bulkInsert(normalized.messages);
             progress.messagesIndexed += normalized.messages.length;
@@ -215,6 +260,20 @@ async function runSync(
       onProgress({ ...progress });
 
       await rebuildFtsIndex();
+
+      // Only spawn embed if not already in progress
+      if (!isEmbeddingInProgress()) {
+        clearEmbeddingProgress();
+        setEmbeddingProgress({
+          status: 'idle',
+          total: progress.messagesIndexed,
+          completed: 0,
+        });
+
+        // Spawn background process for embedding generation
+        spawnBackgroundEmbedding();
+        progress.embeddingStarted = true;
+      }
     }
 
     progress.phase = 'done';

@@ -4,6 +4,7 @@ import { syncCommand } from './cli/commands/sync.js';
 import { searchCommand } from './cli/commands/search.js';
 import { listCommand } from './cli/commands/list.js';
 import { showCommand } from './cli/commands/show.js';
+import { statusCommand } from './cli/commands/status.js';
 
 const program = new Command()
   .name('dex')
@@ -17,10 +18,10 @@ program
   .action(syncCommand);
 
 program
-  .command('search <query>')
+  .command('search <query...>')
   .description('Full-text search across conversations')
   .option('-l, --limit <number>', 'Maximum number of results', '20')
-  .action(searchCommand);
+  .action((queryParts: string[], options) => searchCommand(queryParts.join(' '), options));
 
 program
   .command('list')
@@ -33,5 +34,10 @@ program
   .command('show <id>')
   .description('View a conversation')
   .action(showCommand);
+
+program
+  .command('status')
+  .description('Check embedding generation progress')
+  .action(statusCommand);
 
 program.parse();

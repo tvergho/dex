@@ -1,6 +1,7 @@
 import * as lancedb from '@lancedb/lancedb';
 import { getLanceDBPath } from '../utils/config.js';
 import type { Table } from '@lancedb/lancedb';
+import { EMBEDDING_DIMENSIONS } from '../embeddings/index.js';
 
 let db: lancedb.Connection | null = null;
 
@@ -95,7 +96,7 @@ async function ensureTables(): Promise<void> {
     conversationsTable = await db.openTable('conversations');
   }
 
-  // Messages table - primary search target
+  // Messages table - primary search target with vector embeddings
   if (!existingTables.includes('messages')) {
     messagesTable = await db.createTable('messages', [
       {
@@ -105,10 +106,11 @@ async function ensureTables(): Promise<void> {
         content: '',
         timestamp: '',          // Empty string instead of null
         messageIndex: 0,
+        vector: new Array(EMBEDDING_DIMENSIONS).fill(0), // Vector embeddings for hybrid search
       },
     ]);
     await messagesTable.delete("id = '_placeholder_'");
-    // Note: FTS index will be created/rebuilt after sync when data exists
+    // Note: FTS and vector indexes will be created/rebuilt after sync when data exists
   } else {
     messagesTable = await db.openTable('messages');
   }
@@ -198,4 +200,63 @@ export async function rebuildFtsIndex(): Promise<void> {
     config: lancedb.Index.fts(),
     replace: true,
   });
+}
+
+export async function rebuildVectorIndex(): Promise<void> {
+  const table = await getMessagesTable();
+
+  // Create IVF-PQ vector index for efficient similarity search
+  await table.createIndex('vector', {
+    config: lancedb.Index.ivfPq({
+      numPartitions: 256,
+      numSubVectors: 16,
+    }),
+    replace: true,
+  });
+}
+
+export async function needsVectorMigration(): Promise<boolean> {
+  const table = await getMessagesTable();
+
+  // Check if the table has a vector column by trying to get schema
+  try {
+    const schema = await table.schema();
+    const hasVector = schema.fields.some((f) => f.name === 'vector');
+    return !hasVector;
+  } catch {
+    return true;
+  }
+}
+
+export async function dropMessagesTable(): Promise<void> {
+  if (!db) {
+    await connect();
+  }
+  await db!.dropTable('messages');
+  messagesTable = null;
+}
+
+export async function recreateMessagesTable(): Promise<void> {
+  if (!db) {
+    await connect();
+  }
+
+  // Drop and recreate with vector column
+  const existingTables = await db!.tableNames();
+  if (existingTables.includes('messages')) {
+    await db!.dropTable('messages');
+  }
+
+  messagesTable = await db!.createTable('messages', [
+    {
+      id: '_placeholder_',
+      conversationId: '',
+      role: 'user',
+      content: '',
+      timestamp: '',
+      messageIndex: 0,
+      vector: new Array(EMBEDDING_DIMENSIONS).fill(0),
+    },
+  ]);
+  await messagesTable.delete("id = '_placeholder_'");
 }

@@ -18,6 +18,7 @@ import type {
   ConversationFile,
   MessageFile,
 } from '../schema/index.js';
+import { EMBEDDING_DIMENSIONS, embedQuery } from '../embeddings/index.js';
 
 // Helper to group array by key
 function groupBy<T>(array: T[], keyFn: (item: T) => string): Record<string, T[]> {
@@ -206,9 +207,19 @@ export const messageRepo = {
       content: msg.content,
       timestamp: msg.timestamp ?? '',
       messageIndex: msg.messageIndex,
+      vector: new Array(EMBEDDING_DIMENSIONS).fill(0), // Placeholder, will be updated with embeddings
     }));
 
     await table.add(rows);
+  },
+
+  async updateVector(messageId: string, vector: number[]): Promise<void> {
+    const table = await getMessagesTable();
+    // Use LanceDB's update() to preserve FTS index
+    await table.update({
+      where: `id = '${messageId}'`,
+      values: { vector },
+    });
   },
 
   async findByConversation(conversationId: string): Promise<Message[]> {
@@ -240,27 +251,98 @@ export const messageRepo = {
   async search(query: string, limit = 50): Promise<MessageMatch[]> {
     const table = await getMessagesTable();
 
-    const results = await table
-      .search(query, 'fts')
-      .select(['id', 'conversationId', 'role', 'content', 'messageIndex'])
-      .limit(limit)
-      .toArray();
+    // Manual hybrid search: run FTS and vector separately, then combine with RRF
+    try {
+      // Get vector for semantic search
+      const queryVector = await embedQuery(query);
 
-    return results.map((row) => {
-      const content = row.content as string;
-      const { snippet, highlightRanges } = extractSnippet(content, query);
+      // Run both searches in parallel
+      const [ftsResults, vectorResults] = await Promise.all([
+        table
+          .search(query, 'fts')
+          .select(['id', 'conversationId', 'role', 'content', 'messageIndex'])
+          .limit(limit * 2)
+          .toArray(),
+        table
+          .query()
+          .nearestTo(queryVector)
+          .select(['id', 'conversationId', 'role', 'content', 'messageIndex'])
+          .limit(limit * 2)
+          .toArray(),
+      ]);
 
-      return {
-        messageId: row.id as string,
-        conversationId: row.conversationId as string,
-        role: row.role as MessageMatch['role'],
-        content,
-        snippet,
-        highlightRanges,
-        score: (row._score as number) ?? 0,
-        messageIndex: row.messageIndex as number,
-      };
-    });
+      // Reciprocal Rank Fusion (RRF) to combine results
+      const k = 60; // RRF constant
+      const scores = new Map<string, { score: number; row: Record<string, unknown> }>();
+
+      // Score FTS results
+      ftsResults.forEach((row, rank) => {
+        const id = row.id as string;
+        const rrfScore = 1 / (k + rank + 1);
+        const existing = scores.get(id);
+        if (existing) {
+          existing.score += rrfScore;
+        } else {
+          scores.set(id, { score: rrfScore, row });
+        }
+      });
+
+      // Score vector results
+      vectorResults.forEach((row, rank) => {
+        const id = row.id as string;
+        const rrfScore = 1 / (k + rank + 1);
+        const existing = scores.get(id);
+        if (existing) {
+          existing.score += rrfScore;
+        } else {
+          scores.set(id, { score: rrfScore, row });
+        }
+      });
+
+      // Sort by combined score and take top results
+      const combined = Array.from(scores.values())
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+
+      return combined.map(({ score, row }) => {
+        const content = row.content as string;
+        const { snippet, highlightRanges } = extractSnippet(content, query);
+
+        return {
+          messageId: row.id as string,
+          conversationId: row.conversationId as string,
+          role: row.role as MessageMatch['role'],
+          content,
+          snippet,
+          highlightRanges,
+          score,
+          messageIndex: row.messageIndex as number,
+        };
+      });
+    } catch {
+      // Fallback to FTS-only if embedding model not available
+      const results = await table
+        .search(query, 'fts')
+        .select(['id', 'conversationId', 'role', 'content', 'messageIndex'])
+        .limit(limit)
+        .toArray();
+
+      return results.map((row) => {
+        const content = row.content as string;
+        const { snippet, highlightRanges } = extractSnippet(content, query);
+
+        return {
+          messageId: row.id as string,
+          conversationId: row.conversationId as string,
+          role: row.role as MessageMatch['role'],
+          content,
+          snippet,
+          highlightRanges,
+          score: (row._score as number) ?? 0,
+          messageIndex: row.messageIndex as number,
+        };
+      });
+    }
   },
 };
 
