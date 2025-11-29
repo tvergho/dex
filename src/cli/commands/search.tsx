@@ -65,10 +65,12 @@ function ResultRow({
   result,
   isSelected,
   width,
+  query,
 }: {
   result: ConversationResult;
   isSelected: boolean;
   width: number;
+  query: string;
 }) {
   const { conversation, bestMatch, totalMatches } = result;
 
@@ -116,7 +118,8 @@ function ResultRow({
         ) : null}
       </Box>
       <Box>
-        <Text dimColor={!isSelected}>{'  '}{snippetText}</Text>
+        <Text>{'  '}</Text>
+        <HighlightedText text={snippetText} query={query} dimColor={!isSelected} />
       </Box>
     </Box>
   );
@@ -205,26 +208,30 @@ function MatchesView({
           const roleColor = match.role === 'user' ? 'green' : 'blue';
           const roleLabel = match.role === 'user' ? 'You' : 'Assistant';
 
+          // Truncate file list to avoid wrapping
+          const filesDisplay = msgFileNames.length > 0
+            ? msgFileNames.slice(0, 2).join(', ') + (msgFileNames.length > 2 ? ` +${msgFileNames.length - 2}` : '')
+            : '';
+
           return (
             <Box
               key={match.messageId}
               flexDirection="column"
-              marginBottom={1}
               height={3}
             >
               <Box>
                 <Text backgroundColor={isSelected ? 'cyan' : undefined} color={isSelected ? 'black' : 'gray'}>
                   {isSelected ? ' ▸ ' : '   '}
                 </Text>
-                <Box width={9}>
+                <Box width={14}>
                   <Text color={roleColor} bold={isSelected}>
                     {roleLabel}
                   </Text>
+                  <Text dimColor> #{match.messageIndex + 1}</Text>
                 </Box>
-                {msgFileNames.length > 0 && (
-                  <Text dimColor> ({msgFileNames.join(', ')})</Text>
+                {filesDisplay && (
+                  <Text dimColor wrap="truncate"> ({filesDisplay})</Text>
                 )}
-                <Text dimColor> · msg {match.messageIndex + 1}</Text>
               </Box>
               <Box marginLeft={12}>
                 <HighlightedText
@@ -272,8 +279,8 @@ function ConversationView({
     return parts[parts.length - 1] || f.filePath;
   });
 
-  // Header: title + project info + workspace path + files (optional) + message count
-  const headerHeight = 4 + (files.length > 0 ? 1 : 0);
+  // Header: title + project info + workspace path + files (optional) + message count + separator
+  const headerHeight = 5 + (files.length > 0 ? 1 : 0);
   const availableHeight = height - headerHeight;
   const messagesPerPage = Math.max(1, Math.floor(availableHeight / 3));
 
@@ -326,8 +333,13 @@ function ConversationView({
             return parts[parts.length - 1] || f.filePath;
           });
 
-          // Truncate messages to ~2 lines for readable view
-          const maxLen = (width - 14) * 2;
+          // Truncate file list to avoid wrapping
+          const filesDisplay = msgFileNames.length > 0
+            ? msgFileNames.slice(0, 2).join(', ') + (msgFileNames.length > 2 ? ` +${msgFileNames.length - 2}` : '')
+            : '';
+
+          // Truncate messages to ~1 line for readable view
+          const maxLen = width - 14;
           const truncatedContent = msg.content.replace(/\n/g, ' ').slice(0, maxLen);
           const isTruncated = msg.content.length > maxLen;
           const totalLines = msg.content.split('\n').length;
@@ -339,7 +351,6 @@ function ConversationView({
             <Box
               key={msg.id}
               flexDirection="column"
-              marginBottom={1}
               height={3}
             >
               <Box>
@@ -351,8 +362,8 @@ function ConversationView({
                     {roleLabel}
                   </Text>
                 </Box>
-                {msgFileNames.length > 0 && (
-                  <Text dimColor> ({msgFileNames.join(', ')})</Text>
+                {filesDisplay && (
+                  <Text dimColor wrap="truncate"> ({filesDisplay})</Text>
                 )}
                 {isHighlighted && !isSelected && (
                   <Text color="yellow" dimColor> matched</Text>
@@ -513,7 +524,7 @@ function SearchApp({
 
     // Scroll to show the highlighted message and select it
     if (targetMessageIndex !== undefined) {
-      const messagesPerPage = Math.max(1, Math.floor((height - 8) / 3));
+      const messagesPerPage = Math.max(1, Math.floor((height - 6) / 3));
       const targetScroll = Math.max(0, targetMessageIndex - Math.floor(messagesPerPage / 2));
       setConversationScrollOffset(Math.min(targetScroll, Math.max(0, msgs.length - messagesPerPage)));
       setHighlightMessageIndex(targetMessageIndex);
@@ -573,7 +584,7 @@ function SearchApp({
       } else if (input === 'j' || key.downArrow) {
         setSelectedMessageIndex((i) => Math.min(i + 1, conversationMessages.length - 1));
         // Adjust scroll to keep selected message visible
-        const messagesPerPage = Math.max(1, Math.floor((height - 8) / 5));
+        const messagesPerPage = Math.max(1, Math.floor((height - 6) / 3));
         setConversationScrollOffset((o) => {
           const newIdx = Math.min(selectedMessageIndex + 1, conversationMessages.length - 1);
           if (newIdx >= o + messagesPerPage) {
@@ -594,7 +605,7 @@ function SearchApp({
         setConversationScrollOffset(0);
         setSelectedMessageIndex(0);
       } else if (input === 'G') {
-        const messagesPerPage = Math.max(1, Math.floor((height - 8) / 5));
+        const messagesPerPage = Math.max(1, Math.floor((height - 6) / 3));
         setConversationScrollOffset(Math.max(0, conversationMessages.length - messagesPerPage));
         setSelectedMessageIndex(conversationMessages.length - 1);
       } else if (key.return) {
@@ -747,6 +758,7 @@ function SearchApp({
                 result={result}
                 isSelected={actualIndex === selectedIndex}
                 width={width - 2}
+                query={query}
               />
             );
           })
