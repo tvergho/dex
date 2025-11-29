@@ -24,11 +24,19 @@ src/
 │   ├── types.ts        # Adapter interface definitions
 │   └── index.ts        # Adapter registry
 ├── cli/
-│   └── commands/       # CLI command implementations
-│       ├── search.tsx  # Search with 3-level navigation
-│       ├── list.tsx    # List conversations
-│       ├── show.tsx    # Show single conversation
-│       └── sync.tsx    # Sync data from sources
+│   ├── commands/       # CLI command implementations
+│   │   ├── search.tsx  # Search with 4-level navigation
+│   │   ├── list.tsx    # List conversations
+│   │   ├── show.tsx    # Show single conversation
+│   │   ├── sync.tsx    # Sync data from sources
+│   │   ├── status.tsx  # Embedding progress status
+│   │   └── embed.ts    # Background embedding worker
+│   └── components/     # Reusable UI components
+│       ├── HighlightedText.tsx
+│       ├── ResultRow.tsx
+│       ├── MatchesView.tsx
+│       ├── ConversationView.tsx
+│       └── MessageDetailView.tsx
 ├── db/
 │   ├── index.ts        # LanceDB connection & table setup
 │   └── repository.ts   # Data access layer
@@ -36,7 +44,11 @@ src/
 │   └── index.ts        # Zod schemas for all entities
 ├── utils/
 │   ├── config.ts       # Configuration paths
+│   ├── format.ts       # Shared formatting utilities
 │   └── platform.ts     # OS detection
+├── embeddings/         # Vector embedding generation
+│   ├── index.ts        # Embedding orchestration
+│   └── llama-server.ts # llama-server integration
 └── index.ts            # CLI entry point (Commander.js)
 ```
 
@@ -47,6 +59,7 @@ bun run dev sync        # Index conversations from all sources
 bun run dev search "query"  # Search conversations
 bun run dev list        # List all conversations
 bun run dev show <id>   # Show a specific conversation
+bun run dev status      # Check embedding progress
 bun run typecheck       # Run TypeScript type checking
 ```
 
@@ -67,10 +80,11 @@ Each source (Cursor, Claude Code, etc.) implements `SourceAdapter`:
 - **sync_state** - Incremental sync tracking
 
 ### UI Navigation (Search)
-Three-level navigation pattern:
+Four-level navigation pattern:
 1. **List view** - Search results with j/k navigation, Enter to expand
 2. **Matches view** - All matches in a conversation, Enter to view full conversation
-3. **Conversation view** - Full conversation with highlighted message, Esc to go back
+3. **Conversation view** - Full conversation with highlighted message, Enter for full message
+4. **Message view** - Single message with full content, j/k to scroll, n/p for next/prev
 
 ## Coding Conventions
 
@@ -100,6 +114,15 @@ Three-level navigation pattern:
 - Use `replace: true` when recreating indexes
 - Column names with camelCase need quotes in SQL filters: `"conversationId"`
 - No `dropIndex` method - use `createIndex` with `replace: true`
+
+## Embeddings
+
+Background embedding generation for semantic search:
+- Uses `nomic-embed-text-v1.5` (1024 dimensions) via llama-server
+- Spawned automatically after sync completes
+- Progress tracked in `~/.dex/embedding-progress.json`
+- Model stored in `~/.dex/models/`
+- Check status with `dex status`
 
 ## Data Extraction (Cursor)
 
