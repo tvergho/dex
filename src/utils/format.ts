@@ -120,12 +120,16 @@ export function formatTokenCount(count: number | undefined): string {
 
 /**
  * Format input/output token pair (e.g., "42K in / 2.3K out")
+ * For Claude Code, input includes cache tokens (cache_creation + cache_read + input)
  */
 export function formatTokenPair(
   inputTokens: number | undefined,
-  outputTokens: number | undefined
+  outputTokens: number | undefined,
+  cacheCreationTokens?: number,
+  cacheReadTokens?: number
 ): string {
-  const input = inputTokens || 0;
+  // Total input = regular input + cache tokens (for Claude Code)
+  const input = (inputTokens || 0) + (cacheCreationTokens || 0) + (cacheReadTokens || 0);
   const output = outputTokens || 0;
   if (input === 0 && output === 0) return '';
   return `${formatTokenCount(input) || '0'} in / ${formatTokenCount(output) || '0'} out`;

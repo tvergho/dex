@@ -64,7 +64,12 @@ export function ConversationView({
     : '';
 
   // Format conversation-level token totals
-  const tokenTotals = formatTokenPair(conversation.totalInputTokens, conversation.totalOutputTokens);
+  const tokenTotals = formatTokenPair(
+    conversation.totalInputTokens,
+    conversation.totalOutputTokens,
+    conversation.totalCacheCreationTokens,
+    conversation.totalCacheReadTokens
+  );
 
   return (
     <Box flexDirection="column" height={height}>
@@ -103,7 +108,7 @@ export function ConversationView({
 
           // Format per-message tokens (only show for assistant messages)
           const msgTokens = msg.role === 'assistant'
-            ? formatTokenPair(msg.inputTokens, msg.outputTokens)
+            ? formatTokenPair(msg.inputTokens, msg.outputTokens, msg.cacheCreationTokens, msg.cacheReadTokens)
             : '';
 
           // Truncate messages to ~1 line for readable view

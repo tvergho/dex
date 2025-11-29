@@ -47,7 +47,12 @@ function ConversationRow({
   const timeStr = formatRelativeTime(conversation.updatedAt);
   const msgStr = `${conversation.messageCount} msg${conversation.messageCount !== 1 ? 's' : ''}`;
   const sourceName = formatSourceName(conversation.source);
-  const tokenStr = formatTokenPair(conversation.totalInputTokens, conversation.totalOutputTokens);
+  const tokenStr = formatTokenPair(
+    conversation.totalInputTokens,
+    conversation.totalOutputTokens,
+    conversation.totalCacheCreationTokens,
+    conversation.totalCacheReadTokens
+  );
 
   // Truncate workspace path if needed
   const maxPathWidth = width - 6 - sourceName.length - 3;
@@ -251,7 +256,12 @@ async function plainList(limit: number, source?: string): Promise<void> {
     if (conv.workspacePath) {
       console.log(`   ${conv.workspacePath}`);
     }
-    const tokenStr = formatTokenPair(conv.totalInputTokens, conv.totalOutputTokens);
+    const tokenStr = formatTokenPair(
+      conv.totalInputTokens,
+      conv.totalOutputTokens,
+      conv.totalCacheCreationTokens,
+      conv.totalCacheReadTokens
+    );
     const tokenInfo = tokenStr ? ` · ${tokenStr}` : '';
     console.log(`   ${formatMessageCount(conv.messageCount)} · ${formatRelativeTime(conv.updatedAt)}${tokenInfo}`);
     console.log(`   ID: ${conv.id}`);
