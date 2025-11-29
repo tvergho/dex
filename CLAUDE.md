@@ -18,9 +18,8 @@ Dex is a local search engine for coding agent conversations. It indexes conversa
 src/
 ├── adapters/           # Source-specific data extraction
 │   ├── cursor/         # Cursor IDE adapter
-│   │   ├── index.ts    # Adapter implementation
-│   │   ├── parser.ts   # Data extraction logic
-│   │   └── paths.ts    # Platform-specific paths
+│   ├── claude-code/    # Claude Code CLI adapter
+│   ├── codex/          # Codex CLI adapter
 │   ├── types.ts        # Adapter interface definitions
 │   └── index.ts        # Adapter registry
 ├── cli/
@@ -139,17 +138,25 @@ Background embedding generation for semantic search:
 - Model stored in `~/.dex/models/`
 - Check status with `dex status`
 
-## Data Extraction (Cursor)
+## Data Extraction
 
-Cursor stores conversations in:
+### Cursor
+Stores conversations in SQLite:
 - macOS: `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`
 - Key format: `composerData:{composerId}`
+- Fields: `conversation`/`conversationMap`, `context.fileSelections`, `forceMode`, `relevantFiles`
 
-Key fields extracted:
-- `conversation` or `conversationMap` - Message content
-- `context.fileSelections` - Files in context
-- `forceMode` - Mode (chat/edit/agent)
-- `relevantFiles` - Files mentioned in bubbles
+### Claude Code
+Stores conversations in JSONL files:
+- All platforms: `~/.claude/projects/{sanitized-path}/*.jsonl`
+- Entry types: `user`, `assistant`, `summary`, `file-history-snapshot`
+- Fields: `message.content`, `message.usage` (tokens), `toolUseResult`
+
+### Codex CLI
+Stores conversations in JSONL files:
+- All platforms: `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
+- Entry types: `session_meta`, `response_item`, `event_msg`, `turn_context`
+- Fields: `payload.content`, `payload.type` (message/function_call), token counts in `event_msg`
 
 ## Testing Changes
 
