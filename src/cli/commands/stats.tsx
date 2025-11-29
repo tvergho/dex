@@ -719,26 +719,24 @@ function StatsApp({ period }: { period: number }) {
       const maxOffset = Math.max(0, combinedMessages.length - messagesPerPage);
 
       if (input === 'j' || key.downArrow) {
-        // Stop at the last message
-        if (selectedMessageIndex >= maxMessageIndex) {
-          return;
-        }
-        const newIdx = selectedMessageIndex + 1;
-        setSelectedMessageIndex(newIdx);
-        // Adjust scroll to keep selected message visible
-        if (newIdx >= conversationScrollOffset + messagesPerPage) {
-          setConversationScrollOffset(Math.min(newIdx - messagesPerPage + 1, maxOffset));
-        }
+        // Use functional update to get latest state when holding key
+        setSelectedMessageIndex(prev => {
+          const newIdx = Math.min(prev + 1, maxMessageIndex);
+          // Adjust scroll to keep selected message visible
+          if (newIdx >= conversationScrollOffset + messagesPerPage) {
+            setConversationScrollOffset(Math.min(newIdx - messagesPerPage + 1, maxOffset));
+          }
+          return newIdx;
+        });
       } else if (input === 'k' || key.upArrow) {
-        // Stop at the first message
-        if (selectedMessageIndex <= 0) {
-          return;
-        }
-        const newIdx = selectedMessageIndex - 1;
-        setSelectedMessageIndex(newIdx);
-        if (newIdx < conversationScrollOffset) {
-          setConversationScrollOffset(newIdx);
-        }
+        // Use functional update to get latest state when holding key
+        setSelectedMessageIndex(prev => {
+          const newIdx = Math.max(prev - 1, 0);
+          if (newIdx < conversationScrollOffset) {
+            setConversationScrollOffset(newIdx);
+          }
+          return newIdx;
+        });
       } else if (input === 'g') {
         setConversationScrollOffset(0);
         setSelectedMessageIndex(0);
