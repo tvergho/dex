@@ -2,7 +2,7 @@
  * Analytics query functions for the stats dashboard
  */
 
-import { connect, getConversationsTable, getMessagesTable, getFileEditsTable } from './index';
+import { connect, getConversationsTable } from './index';
 import type { Conversation } from '../schema/index';
 
 // --- Types ---
@@ -479,4 +479,39 @@ export async function getSummaryStats(days: number): Promise<SummaryStats> {
     linesRemoved: overview.totalLinesRemoved,
     currentStreak: streak.current,
   };
+}
+
+export interface RecentConversation {
+  id: string;
+  title: string;
+  source: string;
+  createdAt: string;
+  totalTokens: number;
+}
+
+export async function getRecentConversations(
+  period: PeriodFilter,
+  limit: number = 5
+): Promise<RecentConversation[]> {
+  await connect();
+  const table = await getConversationsTable();
+  const rows = await table.query().toArray();
+
+  const filtered = rows.filter(r => isInPeriod(r.createdAt, period));
+
+  // Sort by createdAt descending (most recent first)
+  filtered.sort((a, b) => {
+    const aDate = a.createdAt || '';
+    const bDate = b.createdAt || '';
+    return bDate.localeCompare(aDate);
+  });
+
+  return filtered.slice(0, limit).map(conv => ({
+    id: conv.id,
+    title: conv.title || '(untitled)',
+    source: conv.source || 'unknown',
+    createdAt: conv.createdAt || '',
+    totalTokens: (conv.totalInputTokens || 0) + (conv.totalOutputTokens || 0) +
+      (conv.totalCacheCreationTokens || 0) + (conv.totalCacheReadTokens || 0),
+  }));
 }

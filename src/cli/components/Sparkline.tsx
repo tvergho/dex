@@ -16,10 +16,10 @@ export interface SparklineProps {
 }
 
 /**
- * Calculate trend direction from data
+ * Calculate trend direction and percentage change from data
  */
-function getTrend(data: number[]): 'up' | 'down' | 'flat' {
-  if (data.length < 2) return 'flat';
+function getTrendInfo(data: number[]): { direction: 'up' | 'down' | 'flat'; percent: number } {
+  if (data.length < 2) return { direction: 'flat', percent: 0 };
 
   // Compare first half average to second half average
   const mid = Math.floor(data.length / 2);
@@ -32,9 +32,12 @@ function getTrend(data: number[]): 'up' | 'down' | 'flat' {
   const diff = secondAvg - firstAvg;
   const threshold = Math.max(firstAvg, secondAvg) * 0.1; // 10% threshold
 
-  if (diff > threshold) return 'up';
-  if (diff < -threshold) return 'down';
-  return 'flat';
+  // Calculate percentage change
+  const percent = firstAvg > 0 ? Math.round((diff / firstAvg) * 100) : 0;
+
+  if (diff > threshold) return { direction: 'up', percent: Math.abs(percent) };
+  if (diff < -threshold) return { direction: 'down', percent: Math.abs(percent) };
+  return { direction: 'flat', percent: 0 };
 }
 
 /**
@@ -63,15 +66,15 @@ export function Sparkline({ data, width, color = 'cyan', showTrend = false }: Sp
   }).join('');
 
   // Get trend indicator
-  const trend = showTrend ? getTrend(data) : null;
-  const trendChar = trend === 'up' ? '↑' : trend === 'down' ? '↓' : '';
-  const trendColor = trend === 'up' ? 'green' : trend === 'down' ? 'red' : 'gray';
+  const trendInfo = showTrend ? getTrendInfo(data) : null;
+  const trendChar = trendInfo?.direction === 'up' ? '↑' : trendInfo?.direction === 'down' ? '↓' : '';
+  const trendColor = trendInfo?.direction === 'up' ? 'green' : trendInfo?.direction === 'down' ? 'red' : 'gray';
 
   return (
     <Text>
       <Text color={color}>{sparkline}</Text>
-      {showTrend && trendChar && (
-        <Text color={trendColor}> {trendChar}</Text>
+      {showTrend && trendInfo && trendInfo.direction !== 'flat' && (
+        <Text color={trendColor}> {trendChar}{trendInfo.percent}%</Text>
       )}
     </Text>
   );

@@ -24,6 +24,7 @@ import {
   getActivityByDayOfWeek,
   getStreakInfo,
   getSummaryStats,
+  getRecentConversations,
   type OverviewStats,
   type DayActivity,
   type SourceStats,
@@ -32,10 +33,11 @@ import {
   type CacheStats,
   type StreakInfo,
   type PeriodFilter,
+  type RecentConversation,
 } from '../../db/analytics';
-import { MetricRow, formatLargeNumber, formatTokenDisplay, formatLinesDisplay } from '../components/MetricCard';
+import { formatLargeNumber } from '../components/MetricCard';
 import { Sparkline } from '../components/Sparkline';
-import { HorizontalBar, ProgressBar, type BarItem } from '../components/HorizontalBar';
+import { ProgressBar } from '../components/HorizontalBar';
 import { ActivityHeatmap, HourlyActivity, WeeklyActivity } from '../components/ActivityHeatmap';
 import { formatSourceLabel } from '../../utils/format';
 import type { Conversation } from '../../schema/index';
@@ -58,14 +60,40 @@ interface AllData {
   hourly: number[];
   weekly: number[];
   streak: StreakInfo;
+  recentConversations: RecentConversation[];
 }
 
 // --- Tab Components ---
 
+/**
+ * Format relative time for display (e.g., "2h ago", "1d ago")
+ */
+function formatRelativeTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return `${Math.floor(diffDays / 7)}w ago`;
+}
+
+/**
+ * Get source color for display
+ */
+function getSourceColor(source: string): string {
+  if (source === 'cursor') return 'cyan';
+  if (source === 'claude-code') return 'magenta';
+  return 'yellow'; // codex and others
+}
+
 function OverviewTab({
   data,
   width,
-  height,
   period,
 }: {
   data: AllData;
@@ -73,80 +101,169 @@ function OverviewTab({
   height: number;
   period: number;
 }) {
-  const { overview, daily, sources, streak, lines } = data;
+  const { overview, daily, sources, streak, lines, recentConversations } = data;
 
   // Prepare sparkline data
   const convTrend = daily.map(d => d.conversations);
   const msgTrend = daily.map(d => d.messages);
-  const tokenTrend = daily.map(d => d.tokens);
+  const inputTrend = daily.map(d => d.tokens);
+  const outputTrend = daily.map(d => {
+    // Approximate output as 10% of total if not tracked separately
+    return Math.floor(d.tokens * 0.1);
+  });
 
-  // Source bars
-  const sourceBars: BarItem[] = sources.slice(0, 5).map(s => ({
-    label: s.source,
-    value: s.tokens,
-    color: s.source === 'cursor' ? 'cyan' : s.source === 'claude-code' ? 'magenta' : 'yellow',
-  }));
+  // Calculate widths for two-column layout
+  const halfWidth = Math.floor((width - 4) / 2);
+
+  // Max token value for source bars
+  const maxSourceTokens = sources.length > 0 ? sources[0]!.tokens : 1;
 
   return (
     <Box flexDirection="column">
-      {/* Period header */}
+      {/* Streak header line */}
       <Box marginBottom={1}>
-        <Text bold color="white">Last {period} Days</Text>
-        {streak.current > 0 && (
-          <Text color="yellow"> · {streak.current} day streak</Text>
+        {streak.current > 0 ? (
+          <Text color="yellow" bold>{streak.current} day streak</Text>
+        ) : (
+          <Text color="gray">No current streak</Text>
+        )}
+        <Text color="gray"> · </Text>
+        <Text color="gray">Longest: </Text>
+        <Text color="green" bold>{streak.longest} days</Text>
+        {streak.longestStart && (
+          <Text color="gray"> ({streak.longestStart} – {streak.longestEnd})</Text>
         )}
       </Box>
 
-      {/* Main metrics row */}
-      <Box marginBottom={1}>
-        <MetricRow
-          width={width}
-          metrics={[
-            { label: 'Conversations', value: formatLargeNumber(overview.conversations), color: 'cyan' },
-            { label: 'Messages', value: formatLargeNumber(overview.messages), color: 'green' },
-            { label: 'Input Tokens', value: formatLargeNumber(overview.totalInputTokens), color: 'yellow' },
-            { label: 'Output Tokens', value: formatLargeNumber(overview.totalOutputTokens), color: 'magenta' },
-          ]}
-        />
-      </Box>
-
-      {/* Lines generated */}
-      <Box marginBottom={1}>
-        <MetricRow
-          width={width}
-          metrics={[
-            { label: 'Lines Added', value: `+${formatLargeNumber(lines.totalLinesAdded)}`, color: 'green' },
-            { label: 'Lines Removed', value: `-${formatLargeNumber(lines.totalLinesRemoved)}`, color: 'red' },
-            { label: 'Net Lines', value: lines.netLines >= 0 ? `+${formatLargeNumber(lines.netLines)}` : formatLargeNumber(lines.netLines), color: lines.netLines >= 0 ? 'green' : 'red' },
-            { label: 'Longest Streak', value: `${streak.longest} days`, color: 'yellow' },
-          ]}
-        />
-      </Box>
-
-      {/* Trends */}
+      {/* Two-column layout: ACTIVITY + TOKENS */}
       <Box flexDirection="column" marginBottom={1}>
-        <Text dimColor>Activity Trends</Text>
         <Box>
-          <Box width={Math.floor(width / 3)}>
-            <Text>Conversations: </Text>
-            <Sparkline data={convTrend} width={15} showTrend />
+          <Box width={halfWidth} marginRight={4}>
+            <Text bold color="white">ACTIVITY</Text>
           </Box>
-          <Box width={Math.floor(width / 3)}>
-            <Text>Messages: </Text>
-            <Sparkline data={msgTrend} width={15} color="green" showTrend />
+          <Box width={halfWidth}>
+            <Text bold color="white">TOKENS</Text>
           </Box>
-          <Box width={Math.floor(width / 3)}>
-            <Text>Tokens: </Text>
-            <Sparkline data={tokenTrend} width={15} color="yellow" showTrend />
+        </Box>
+        <Box>
+          <Box width={halfWidth} marginRight={4}>
+            <Text color="gray">{'─'.repeat(Math.max(0, halfWidth - 4))}</Text>
+          </Box>
+          <Box width={halfWidth}>
+            <Text color="gray">{'─'.repeat(Math.max(0, halfWidth - 2))}</Text>
+          </Box>
+        </Box>
+        {/* Labels row */}
+        <Box>
+          <Box width={halfWidth} marginRight={4}>
+            <Text color="gray">{'Conversations'.padEnd(22)}</Text>
+            <Text color="gray">Messages</Text>
+          </Box>
+          <Box width={halfWidth}>
+            <Text color="gray">{'Input'.padEnd(22)}</Text>
+            <Text color="gray">Output</Text>
+          </Box>
+        </Box>
+        {/* Values row */}
+        <Box>
+          <Box width={halfWidth} marginRight={4}>
+            <Text color="cyan" bold>{formatLargeNumber(overview.conversations).padEnd(22)}</Text>
+            <Text color="green" bold>{formatLargeNumber(overview.messages)}</Text>
+          </Box>
+          <Box width={halfWidth}>
+            <Text color="yellow" bold>{formatLargeNumber(overview.totalInputTokens).padEnd(22)}</Text>
+            <Text color="magenta" bold>{formatLargeNumber(overview.totalOutputTokens)}</Text>
+          </Box>
+        </Box>
+        {/* Sparklines row */}
+        <Box>
+          <Box width={halfWidth} marginRight={4}>
+            <Box width={22}><Sparkline data={convTrend} width={12} showTrend /></Box>
+            <Sparkline data={msgTrend} width={12} color="green" showTrend />
+          </Box>
+          <Box width={halfWidth}>
+            <Box width={22}><Sparkline data={inputTrend} width={12} color="yellow" showTrend /></Box>
+            <Sparkline data={outputTrend} width={12} color="magenta" showTrend />
           </Box>
         </Box>
       </Box>
 
-      {/* Sources breakdown */}
-      {sourceBars.length > 0 && (
+      {/* LINES GENERATED section */}
+      <Box flexDirection="column" marginBottom={1}>
+        <Text bold color="white">LINES GENERATED</Text>
+        <Box><Text color="gray">{'─'.repeat(Math.max(0, halfWidth - 2))}</Text></Box>
+        <Box>
+          <Text color="green">+{formatLargeNumber(lines.totalLinesAdded)}</Text>
+          <Text color="gray"> added    </Text>
+          <Text color="red">−{formatLargeNumber(lines.totalLinesRemoved)}</Text>
+          <Text color="gray"> removed    </Text>
+          <Text color={lines.netLines >= 0 ? 'green' : 'red'} bold>
+            {lines.netLines >= 0 ? '+' : ''}{formatLargeNumber(lines.netLines)}
+          </Text>
+          <Text color="gray"> net</Text>
+        </Box>
+      </Box>
+
+      {/* By Source table */}
+      {sources.length > 0 && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold color="white">By Source</Text>
+          <Box><Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text></Box>
+          {/* Header row */}
+          <Box>
+            <Text color="gray">{''.padEnd(14)}</Text>
+            <Text color="gray">{'Convos'.padStart(8)}</Text>
+            <Text color="gray">{'Messages'.padStart(10)}</Text>
+            <Text color="gray">{'Tokens'.padStart(10)}</Text>
+          </Box>
+          {/* Data rows */}
+          {sources.slice(0, 3).map((s, idx) => {
+            const barWidth = Math.max(20, width - 50);
+            const proportion = s.tokens / maxSourceTokens;
+            const filledWidth = Math.max(1, Math.round(proportion * barWidth));
+            const emptyWidth = barWidth - filledWidth;
+            const sourceColor = getSourceColor(s.source);
+            const label = formatSourceLabel(s.source).padEnd(12);
+
+            return (
+              <Box key={idx}>
+                <Text color={sourceColor}>■ </Text>
+                <Text>{label}</Text>
+                <Text color="gray">{String(s.conversations).padStart(8)}</Text>
+                <Text color="gray">{formatLargeNumber(s.messages).padStart(10)}</Text>
+                <Text color="gray">{formatLargeNumber(s.tokens).padStart(10)}</Text>
+                <Text>  </Text>
+                <Text color={sourceColor}>{'█'.repeat(filledWidth)}</Text>
+                <Text color="gray">{'░'.repeat(emptyWidth)}</Text>
+              </Box>
+            );
+          })}
+        </Box>
+      )}
+
+      {/* Recent Conversations */}
+      {recentConversations.length > 0 && (
         <Box flexDirection="column">
-          <Text dimColor>By Source (tokens)</Text>
-          <HorizontalBar items={sourceBars} width={Math.min(width, 60)} maxLabelWidth={12} />
+          <Text bold color="white">Recent Conversations</Text>
+          <Box><Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text></Box>
+          {recentConversations.slice(0, 5).map((conv, idx) => {
+            const timeAgo = formatRelativeTime(conv.createdAt).padEnd(8);
+            const source = formatSourceLabel(conv.source).padEnd(13);
+            const tokenStr = formatLargeNumber(conv.totalTokens).padStart(7);
+            const titleWidth = width - 8 - 13 - 9 - 2;
+            const title = conv.title.length > titleWidth
+              ? conv.title.slice(0, titleWidth - 1) + '…'
+              : conv.title;
+
+            return (
+              <Box key={idx}>
+                <Text color="gray">{timeAgo}</Text>
+                <Text color={getSourceColor(conv.source)}>{source}</Text>
+                <Text>{title.padEnd(titleWidth)}</Text>
+                <Text color="cyan">{tokenStr}</Text>
+              </Box>
+            );
+          })}
         </Box>
       )}
     </Box>
@@ -407,7 +524,7 @@ function StatsApp({ period }: { period: number }) {
         const periodFilter = createPeriodFilter(period);
 
         // Load all data in parallel
-        const [overview, daily, sources, models, topConversations, lines, cache, hourly, weekly, streak] = await Promise.all([
+        const [overview, daily, sources, models, topConversations, lines, cache, hourly, weekly, streak, recentConversations] = await Promise.all([
           getOverviewStats(periodFilter),
           getDailyActivity(periodFilter),
           getStatsBySource(periodFilter),
@@ -418,6 +535,7 @@ function StatsApp({ period }: { period: number }) {
           getActivityByHour(periodFilter),
           getActivityByDayOfWeek(periodFilter),
           getStreakInfo(),
+          getRecentConversations(periodFilter, 5),
         ]);
 
         setData({
@@ -431,6 +549,7 @@ function StatsApp({ period }: { period: number }) {
           hourly,
           weekly,
           streak,
+          recentConversations,
         });
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
