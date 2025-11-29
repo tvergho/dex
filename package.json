@@ -10,7 +10,9 @@
     "dev": "tsx src/index.ts",
     "dev:bun": "bun run src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
@@ -29,6 +31,11 @@
     "@types/better-sqlite3": "^7.6.11",
     "@types/bun": "^1.1.13",
     "@types/react": "^18.3.12",
+    "@typescript-eslint/eslint-plugin": "8.48.0",
+    "@typescript-eslint/parser": "8.48.0",
+    "eslint": "9.39.1",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "7.0.1",
     "tsx": "4.20.6",
     "typescript": "^5.6.3"
   }

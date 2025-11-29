@@ -29,7 +29,7 @@ import {
   combineConsecutiveMessages,
   type CombinedMessage,
 } from '../../utils/format.js';
-import type { SearchResponse, Message, ConversationFile, MessageFile } from '../../schema/index.js';
+import type { SearchResponse, ConversationFile, MessageFile } from '../../schema/index.js';
 
 interface SearchOptions {
   limit?: string;

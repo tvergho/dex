@@ -7,8 +7,8 @@
  * Navigate with j/k, view full messages with Enter
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { render, Box, Text, useInput, useApp } from 'ink';
+import React, { useState, useEffect } from 'react';
+import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index.js';
 import { conversationRepo, messageRepo, filesRepo, messageFilesRepo } from '../../db/repository.js';
@@ -104,7 +104,7 @@ function ShowApp({ conversationId }: { conversationId: string }) {
 
   const headerHeight = 4;
   const footerHeight = 2;
-  const availableHeight = height - headerHeight - footerHeight;
+  const _availableHeight = height - headerHeight - footerHeight;
 
   // Simple line-based scrolling
   const maxOffset = Math.max(0, messages.length - 1);

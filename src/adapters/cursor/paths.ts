@@ -1,5 +1,4 @@
 import { existsSync, statSync } from 'fs';
-import { join } from 'path';
 import { getPlatform, expandPath } from '../../utils/platform.js';
 
 export interface CursorGlobalDB {

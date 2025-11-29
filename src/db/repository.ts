@@ -72,7 +72,7 @@ function extractSnippet(
   const start = Math.max(0, firstMatch - contextChars);
   const end = Math.min(content.length, firstMatch + contextChars);
 
-  let snippet = content.slice(start, end);
+  const snippet = content.slice(start, end);
   const prefix = start > 0 ? '...' : '';
   const suffix = end < content.length ? '...' : '';
 

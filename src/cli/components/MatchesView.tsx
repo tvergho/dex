@@ -42,7 +42,7 @@ export function MatchesView({
   selectedMatchIndex,
   query,
   indexMap,
-  combinedMessageCount,
+  combinedMessageCount: _combinedMessageCount,
 }: MatchesViewProps) {
   const { conversation, matches } = result;
 

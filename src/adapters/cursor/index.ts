@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { getCursorGlobalDbPath, getGlobalDatabase } from './paths.js';
+import { getGlobalDatabase } from './paths.js';
 import { extractConversations, type RawConversation } from './parser.js';
 import type { Conversation, Message, SourceRef, ToolCall, ConversationFile, MessageFile } from '../../schema/index.js';
 import type { SourceAdapter, SourceLocation, NormalizedConversation } from '../types.js';
@@ -133,7 +133,7 @@ export class CursorAdapter implements SourceAdapter {
     };
   }
 
-  getDeepLink(ref: SourceRef): string | null {
+  getDeepLink(_ref: SourceRef): string | null {
     // Cursor doesn't have a way to open a specific conversation via URL/CLI
     return null;
   }
