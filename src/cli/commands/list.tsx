@@ -69,34 +69,34 @@ function ConversationRow({
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={isSelected ? 'black' : 'gray'} backgroundColor={isSelected ? 'cyan' : undefined}>
+        <Text color={isSelected ? 'black' : undefined} backgroundColor={isSelected ? 'cyan' : undefined}>
           {isSelected ? ' ▸ ' : '   '}
         </Text>
-        <Text color={isSelected ? 'cyan' : 'white'} bold>
+        <Text color={isSelected ? 'cyan' : 'white'} bold={isSelected} underline={isSelected}>
           {title}
         </Text>
         <Text dimColor> · {msgStr} · {timeStr}</Text>
       </Box>
       <Box marginLeft={3}>
-        <Text color="yellow" dimColor={!isSelected}>{sourceName}</Text>
+        <Text color="yellow">{sourceName}</Text>
         {displayPath && (
           <>
             <Text dimColor> · </Text>
-            <Text color="magenta" dimColor={!isSelected}>{displayPath}</Text>
+            <Text color="magenta">{displayPath}</Text>
           </>
         )}
         {tokenStr && (
           <>
             <Text dimColor> · </Text>
-            <Text color="cyan" dimColor={!isSelected}>{tokenStr}</Text>
+            <Text color="cyan">{tokenStr}</Text>
           </>
         )}
         {lineParts && (
           <>
             <Text dimColor> · </Text>
-            <Text color="green" dimColor={!isSelected}>{lineParts.added}</Text>
-            <Text dimColor> / </Text>
-            <Text color="red" dimColor={!isSelected}>{lineParts.removed}</Text>
+            <Text color="green">{lineParts.added}</Text>
+            <Text color="gray"> / </Text>
+            <Text color="red">{lineParts.removed}</Text>
           </>
         )}
       </Box>
@@ -213,7 +213,7 @@ function ListApp({
           <Text dimColor> ({conversations.length})</Text>
         </Box>
         <Box paddingX={1}>
-          <Text dimColor>{'─'.repeat(Math.max(0, width - 2))}</Text>
+          <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
         </Box>
       </Box>
 
@@ -236,10 +236,14 @@ function ListApp({
       {/* Footer */}
       <Box flexDirection="column">
         <Box paddingX={1}>
-          <Text dimColor>{'─'.repeat(Math.max(0, width - 2))}</Text>
+          <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
         </Box>
         <Box paddingX={1} justifyContent="space-between">
-          <Text dimColor>j/k: navigate · Enter: select · q: quit</Text>
+          <Text>
+            <Text color="white">j/k</Text><Text dimColor>: navigate · </Text>
+            <Text color="white">Enter</Text><Text dimColor>: select · </Text>
+            <Text color="white">q</Text><Text dimColor>: quit</Text>
+          </Text>
           {conversations.length > visibleCount && (
             <Text dimColor>
               {scrollOffset + 1}-{Math.min(scrollOffset + visibleCount, conversations.length)} of {conversations.length}

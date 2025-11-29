@@ -31,7 +31,7 @@ export function HighlightedText({
       {parts.map((part, i) => {
         const isMatch = terms.some((t) => part.toLowerCase() === t);
         if (isMatch) {
-          return <Text key={i} color="yellow" bold>{part}</Text>;
+          return <Text key={i} backgroundColor="yellow" color="black" bold>{part}</Text>;
         }
         return <Text key={i}>{part}</Text>;
       })}

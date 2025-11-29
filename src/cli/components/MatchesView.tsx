@@ -71,15 +71,15 @@ export function MatchesView({
       <Box flexDirection="column">
         <Text bold color="cyan">{conversation.title}</Text>
         <Text>
-          <Text color="yellow" dimColor>{sourceInfo}</Text>
+          <Text color="yellow">{sourceInfo}</Text>
           {workspaceDisplay && <Text dimColor> · </Text>}
-          <Text color="magenta" dimColor>{workspaceDisplay}</Text>
+          <Text color="magenta">{workspaceDisplay}</Text>
         </Text>
         <Text dimColor>
           {formatFilesDisplay(fileNames, files.length)}
         </Text>
         <Text dimColor>{formatMatchCount(matches.length)} · {paginationInfo}</Text>
-        <Text dimColor>{'─'.repeat(Math.max(0, width))}</Text>
+        <Text color="gray">{'─'.repeat(Math.max(0, width))}</Text>
       </Box>
 
       {/* Matches - fixed height per match */}
@@ -107,24 +107,24 @@ export function MatchesView({
               height={3}
             >
               <Box>
-                <Text backgroundColor={isSelected ? 'cyan' : undefined} color={isSelected ? 'black' : 'gray'}>
+                <Text backgroundColor={isSelected ? 'cyan' : undefined} color={isSelected ? 'black' : undefined}>
                   {isSelected ? ' ▸ ' : '   '}
                 </Text>
                 <Box width={14}>
-                  <Text color={roleColor} bold={isSelected}>
+                  <Text color={roleColor} bold>
                     {roleLabel}
                   </Text>
-                  <Text dimColor> #{displayIndex + 1}</Text>
+                  <Text color="gray"> #{displayIndex + 1}</Text>
                 </Box>
                 {filesDisplay && (
-                  <Text dimColor wrap="truncate"> ({filesDisplay})</Text>
+                  <Text color="gray" wrap="truncate"> ({filesDisplay})</Text>
                 )}
               </Box>
               <Box marginLeft={12}>
                 <HighlightedText
                   text={match.content.replace(/\n/g, ' ').slice(0, width - 14)}
                   query={query}
-                  dimColor={!isSelected}
+                  dimColor={false}
                 />
               </Box>
             </Box>

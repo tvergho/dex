@@ -54,21 +54,21 @@ export function ResultRow({
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Box>
-        <Text color={isSelected ? 'black' : 'gray'} backgroundColor={isSelected ? 'cyan' : undefined}>
+        <Text color={isSelected ? 'black' : undefined} backgroundColor={isSelected ? 'cyan' : undefined}>
           {isSelected ? '▸ ' : '  '}
         </Text>
-        <Text color={isSelected ? 'cyan' : 'white'} bold>{title}</Text>
+        <Text color={isSelected ? 'cyan' : 'white'} bold={isSelected} underline={isSelected}>{title}</Text>
         <Text dimColor> · {matchStr} · {timeStr}</Text>
       </Box>
       <Box>
-        <Text color="yellow" dimColor={!isSelected}>{'  '}{sourceName}</Text>
+        <Text color="yellow">{'  '}{sourceName}</Text>
         {displayPath && (
-          <Text color="magenta" dimColor={!isSelected}> · {displayPath}</Text>
+          <Text color="magenta"> · {displayPath}</Text>
         )}
       </Box>
       <Box>
         <Text>{'  '}</Text>
-        <HighlightedText text={snippetText} query={query} dimColor={!isSelected} />
+        <HighlightedText text={snippetText} query={query} dimColor={false} />
       </Box>
     </Box>
   );

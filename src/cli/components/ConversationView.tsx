@@ -84,9 +84,9 @@ export function ConversationView({
       <Box flexDirection="column">
         <Text bold color="cyan">{conversation.title}</Text>
         <Text>
-          <Text color="yellow" dimColor>{sourceInfo}</Text>
+          <Text color="yellow">{sourceInfo}</Text>
           {workspaceDisplay && <Text dimColor> · </Text>}
-          <Text color="magenta" dimColor>{workspaceDisplay}</Text>
+          <Text color="magenta">{workspaceDisplay}</Text>
         </Text>
         <Text dimColor>
           {formatFilesDisplay(fileNames, files.length)}
@@ -103,7 +103,7 @@ export function ConversationView({
             </>
           )}
         </Text>
-        <Text dimColor>{'─'.repeat(Math.max(0, width))}</Text>
+        <Text color="gray">{'─'.repeat(Math.max(0, width))}</Text>
       </Box>
 
       {/* Messages - fixed height per message */}
@@ -147,32 +147,32 @@ export function ConversationView({
               height={3}
             >
               <Box>
-                <Text backgroundColor={isSelected ? 'cyan' : isHighlighted ? 'yellow' : undefined} color={showIndicator ? 'black' : 'gray'}>
+                <Text backgroundColor={isSelected ? 'cyan' : isHighlighted ? 'yellow' : undefined} color={showIndicator ? 'black' : undefined}>
                   {isSelected ? ' ▸ ' : isHighlighted ? ' ★ ' : '   '}
                 </Text>
                 <Box width={14}>
-                  <Text color={roleColor} bold={isSelected || isHighlighted}>
+                  <Text color={roleColor} bold>
                     {roleLabel}
                   </Text>
-                  <Text dimColor> #{msg.combinedIndex + 1}</Text>
+                  <Text color="gray"> #{msg.combinedIndex + 1}</Text>
                 </Box>
                 {filesDisplay && (
-                  <Text dimColor wrap="truncate"> ({filesDisplay})</Text>
+                  <Text color="gray" wrap="truncate"> ({filesDisplay})</Text>
                 )}
                 {msgTokens && (
-                  <Text color="cyan" dimColor> [{msgTokens}]</Text>
+                  <Text color="cyan" dimColor> · {msgTokens}</Text>
                 )}
                 {msgLineParts && (
-                  <Text dimColor> [<Text color="green">{msgLineParts.added}</Text> / <Text color="red">{msgLineParts.removed}</Text>]</Text>
+                  <Text dimColor> · <Text color="green">{msgLineParts.added}</Text> / <Text color="red">{msgLineParts.removed}</Text></Text>
                 )}
                 {isHighlighted && !isSelected && (
-                  <Text color="yellow" dimColor> matched</Text>
+                  <Text color="yellow"> matched</Text>
                 )}
               </Box>
               <Box marginLeft={12}>
-                <Text dimColor={!isSelected && !isHighlighted} wrap="truncate">
+                <Text bold={isSelected || isHighlighted} wrap="truncate">
                   {truncatedContent}
-                  {isTruncated && <Text dimColor> ({totalLines} lines)</Text>}
+                  {isTruncated && <Text color="gray"> ({totalLines} lines)</Text>}
                 </Text>
               </Box>
             </Box>

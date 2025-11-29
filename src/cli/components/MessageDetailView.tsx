@@ -67,20 +67,21 @@ export function MessageDetailView({
 
   return (
     <Box flexDirection="column" height={height}>
-      <Box flexDirection="column" marginBottom={1}>
+      <Box flexDirection="column">
         <Box>
-          <Text color={roleColor} bold>[{roleLabel}]</Text>
-          <Text dimColor> · Message {message.combinedIndex + 1}</Text>
+          <Text color={roleColor} bold>{roleLabel}</Text>
+          <Text color="gray"> #{message.combinedIndex + 1}</Text>
           {fileNames.length > 0 && (
-            <Text dimColor> · Files: {fileNames.join(', ')}</Text>
+            <Text color="gray"> · {fileNames.join(', ')}</Text>
           )}
         </Box>
         <Text dimColor>
           {lines.length} lines · {paginationInfo}
         </Text>
+        <Text color="gray">{'─'.repeat(Math.max(0, width))}</Text>
       </Box>
 
-      <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection="column" flexGrow={1} marginTop={1}>
         <Text>{visibleLines.join('\n')}</Text>
       </Box>
     </Box>

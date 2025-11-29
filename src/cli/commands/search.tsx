@@ -339,14 +339,48 @@ function SearchApp({
     );
   }
 
-  // Determine footer text based on view mode
-  let footerText = 'j/k: navigate · Enter: expand · q: quit';
-  if (viewMode === 'matches') {
-    footerText = 'j/k: navigate · Enter: view conversation · Esc: back · q: quit';
+  // Footer keybindings styled with keys highlighted
+  const Key = ({ k }: { k: string }) => <Text color="white">{k}</Text>;
+  const Sep = () => <Text dimColor> · </Text>;
+
+  let footerContent: React.ReactNode;
+  if (viewMode === 'message') {
+    footerContent = (
+      <>
+        <Key k="j/k" /><Text dimColor>: scroll</Text><Sep />
+        <Key k="n/p" /><Text dimColor>: next/prev</Text><Sep />
+        <Key k="g/G" /><Text dimColor>: top/bottom</Text><Sep />
+        <Key k="Esc" /><Text dimColor>: back</Text><Sep />
+        <Key k="q" /><Text dimColor>: quit</Text>
+      </>
+    );
   } else if (viewMode === 'conversation') {
-    footerText = 'j/k: select · Enter: view full message · g/G: top/bottom · Esc: back · q: quit';
-  } else if (viewMode === 'message') {
-    footerText = 'j/k: scroll · n/p: next/prev message · g/G: top/bottom · Esc: back · q: quit';
+    footerContent = (
+      <>
+        <Key k="j/k" /><Text dimColor>: select</Text><Sep />
+        <Key k="Enter" /><Text dimColor>: view full</Text><Sep />
+        <Key k="g/G" /><Text dimColor>: top/bottom</Text><Sep />
+        <Key k="Esc" /><Text dimColor>: back</Text><Sep />
+        <Key k="q" /><Text dimColor>: quit</Text>
+      </>
+    );
+  } else if (viewMode === 'matches') {
+    footerContent = (
+      <>
+        <Key k="j/k" /><Text dimColor>: navigate</Text><Sep />
+        <Key k="Enter" /><Text dimColor>: view conversation</Text><Sep />
+        <Key k="Esc" /><Text dimColor>: back</Text><Sep />
+        <Key k="q" /><Text dimColor>: quit</Text>
+      </>
+    );
+  } else {
+    footerContent = (
+      <>
+        <Key k="j/k" /><Text dimColor>: navigate</Text><Sep />
+        <Key k="Enter" /><Text dimColor>: expand</Text><Sep />
+        <Key k="q" /><Text dimColor>: quit</Text>
+      </>
+    );
   }
 
   return (
@@ -362,7 +396,7 @@ function SearchApp({
           </Text>
         </Box>
         <Box paddingX={1}>
-          <Text dimColor>{'─'.repeat(Math.max(0, width - 2))}</Text>
+          <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
         </Box>
       </Box>
 
@@ -423,10 +457,10 @@ function SearchApp({
       {/* Footer */}
       <Box flexDirection="column">
         <Box paddingX={1}>
-          <Text dimColor>{'─'.repeat(Math.max(0, width - 2))}</Text>
+          <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
         </Box>
         <Box paddingX={1} justifyContent="space-between">
-          <Text dimColor>{footerText}</Text>
+          <Text>{footerContent}</Text>
           {viewMode === 'list' && response.results.length > visibleCount && (
             <Text dimColor>
               {scrollOffset + 1}-{Math.min(scrollOffset + visibleCount, response.results.length)} of {response.results.length}
