@@ -1,29 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { render, Box, Text, useInput, useApp } from 'ink';
+import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index.js';
 import { conversationRepo } from '../../db/repository.js';
+import {
+  formatRelativeTime,
+  formatSourceName,
+  formatSourceInfo,
+  truncatePath,
+  formatMessageCount,
+} from '../../utils/format.js';
 import type { Conversation } from '../../schema/index.js';
 
 interface ListOptions {
   limit?: string;
   source?: string;
-}
-
-function formatRelativeTime(isoDate: string | undefined): string {
-  if (!isoDate) return '';
-
-  const date = new Date(isoDate);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffDays === 0) return 'today';
-  if (diffDays === 1) return 'yesterday';
-  if (diffDays < 7) return `${diffDays}d ago`;
-  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-  if (diffDays < 365) return `${Math.floor(diffDays / 30)}mo ago`;
-  return `${Math.floor(diffDays / 365)}y ago`;
 }
 
 function ConversationRow({
@@ -45,15 +36,12 @@ function ConversationRow({
 
   const timeStr = formatRelativeTime(conversation.updatedAt);
   const msgStr = `${conversation.messageCount} msg${conversation.messageCount !== 1 ? 's' : ''}`;
-
-  // Capitalize source name (e.g., "Cursor")
-  const sourceName = conversation.source.charAt(0).toUpperCase() + conversation.source.slice(1);
+  const sourceName = formatSourceName(conversation.source);
 
   // Truncate workspace path if needed
-  const workspacePath = conversation.workspacePath;
   const maxPathWidth = width - 6 - sourceName.length - 3;
-  const displayPath = workspacePath
-    ? (workspacePath.length > maxPathWidth ? '…' + workspacePath.slice(-(maxPathWidth - 1)) : workspacePath)
+  const displayPath = conversation.workspacePath
+    ? truncatePath(conversation.workspacePath, maxPathWidth)
     : null;
 
   return (
@@ -241,14 +229,12 @@ async function plainList(limit: number, source?: string): Promise<void> {
 
   for (const conv of conversations) {
     console.log(`${conv.title}`);
-    // Build source info line (e.g., "Cursor · gpt-4")
-    const sourceName = conv.source.charAt(0).toUpperCase() + conv.source.slice(1);
-    const sourceInfo = conv.model ? `${sourceName} · ${conv.model}` : sourceName;
+    const sourceInfo = formatSourceInfo(conv.source, conv.model);
     console.log(`   ${sourceInfo}`);
     if (conv.workspacePath) {
       console.log(`   ${conv.workspacePath}`);
     }
-    console.log(`   ${conv.messageCount} message(s) · ${formatRelativeTime(conv.updatedAt)}`);
+    console.log(`   ${formatMessageCount(conv.messageCount)} · ${formatRelativeTime(conv.updatedAt)}`);
     console.log(`   ID: ${conv.id}`);
     console.log('');
   }
