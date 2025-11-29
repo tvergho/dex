@@ -88,6 +88,10 @@ async function ensureTables(): Promise<void> {
         updatedAt: '',          // Empty string instead of null
         messageCount: 0,
         sourceRefJson: '{}',
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCacheCreationTokens: 0,
+        totalCacheReadTokens: 0,
       },
     ]);
     // Delete placeholder row
@@ -107,6 +111,10 @@ async function ensureTables(): Promise<void> {
         timestamp: '',          // Empty string instead of null
         messageIndex: 0,
         vector: new Array(EMBEDDING_DIMENSIONS).fill(0), // Vector embeddings for hybrid search
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
       },
     ]);
     await messagesTable.delete("id = '_placeholder_'");
@@ -256,6 +264,10 @@ export async function recreateMessagesTable(): Promise<void> {
       timestamp: '',
       messageIndex: 0,
       vector: new Array(EMBEDDING_DIMENSIONS).fill(0),
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
     },
   ]);
   await messagesTable.delete("id = '_placeholder_'");

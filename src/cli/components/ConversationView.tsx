@@ -10,6 +10,7 @@ import {
   formatFileList,
   getRoleColor,
   getRoleLabel,
+  formatTokenPair,
   type CombinedMessage,
 } from '../../utils/format';
 import type { Conversation, ConversationFile, MessageFile } from '../../schema/index';
@@ -62,6 +63,9 @@ export function ConversationView({
     ? truncatePath(conversation.workspacePath, width - sourceInfo.length - 7)
     : '';
 
+  // Format conversation-level token totals
+  const tokenTotals = formatTokenPair(conversation.totalInputTokens, conversation.totalOutputTokens);
+
   return (
     <Box flexDirection="column" height={height}>
       {/* Fixed header - always same structure */}
@@ -75,7 +79,10 @@ export function ConversationView({
         <Text dimColor>
           {formatFilesDisplay(fileNames, files.length)}
         </Text>
-        <Text dimColor>{formatMessageCount(messages.length)} · {paginationInfo}</Text>
+        <Text dimColor>
+          {formatMessageCount(messages.length)} · {paginationInfo}
+          {tokenTotals && <Text color="cyan"> · {tokenTotals}</Text>}
+        </Text>
         <Text dimColor>{'─'.repeat(Math.max(0, width))}</Text>
       </Box>
 
@@ -93,6 +100,11 @@ export function ConversationView({
           const msgFileNames = msgFiles.map((f) => getFileName(f.filePath));
 
           const filesDisplay = formatFileList(msgFileNames, 2);
+
+          // Format per-message tokens (only show for assistant messages)
+          const msgTokens = msg.role === 'assistant'
+            ? formatTokenPair(msg.inputTokens, msg.outputTokens)
+            : '';
 
           // Truncate messages to ~1 line for readable view
           const maxLen = width - 14;
@@ -120,6 +132,9 @@ export function ConversationView({
                 </Box>
                 {filesDisplay && (
                   <Text dimColor wrap="truncate"> ({filesDisplay})</Text>
+                )}
+                {msgTokens && (
+                  <Text color="cyan" dimColor> [{msgTokens}]</Text>
                 )}
                 {isHighlighted && !isSelected && (
                   <Text color="yellow" dimColor> matched</Text>

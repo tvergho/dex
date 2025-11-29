@@ -13,10 +13,18 @@ interface ClaudeMessageContent {
   content?: string;
 }
 
+interface ClaudeMessageUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+}
+
 interface ClaudeMessage {
   role: 'user' | 'assistant';
   content: string | ClaudeMessageContent[];
   model?: string;
+  usage?: ClaudeMessageUsage;
 }
 
 interface ToolUseResult {
@@ -57,6 +65,10 @@ export interface RawMessage {
   toolCalls: RawToolCall[];
   files: RawFile[];
   isSidechain: boolean;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
 }
 
 export interface RawToolCall {
@@ -83,6 +95,10 @@ export interface RawConversation {
   updatedAt?: string;
   messages: RawMessage[];
   files: RawFile[];
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
+  totalCacheCreationTokens?: number;
+  totalCacheReadTokens?: number;
 }
 
 /**
@@ -282,6 +298,9 @@ export function extractConversations(project: ClaudeCodeProject): RawConversatio
         }
       }
 
+      // Extract token usage from message
+      const usage = entry.message.usage;
+
       messages.push({
         uuid: entry.uuid,
         parentUuid: entry.parentUuid ?? null,
@@ -291,10 +310,20 @@ export function extractConversations(project: ClaudeCodeProject): RawConversatio
         toolCalls,
         files,
         isSidechain: entry.isSidechain ?? false,
+        inputTokens: usage?.input_tokens,
+        outputTokens: usage?.output_tokens,
+        cacheCreationTokens: usage?.cache_creation_input_tokens,
+        cacheReadTokens: usage?.cache_read_input_tokens,
       });
     }
 
     if (messages.length === 0) continue;
+
+    // Calculate total token usage
+    const totalInputTokens = messages.reduce((sum, m) => sum + (m.inputTokens || 0), 0);
+    const totalOutputTokens = messages.reduce((sum, m) => sum + (m.outputTokens || 0), 0);
+    const totalCacheCreationTokens = messages.reduce((sum, m) => sum + (m.cacheCreationTokens || 0), 0);
+    const totalCacheReadTokens = messages.reduce((sum, m) => sum + (m.cacheReadTokens || 0), 0);
 
     conversations.push({
       sessionId,
@@ -307,6 +336,10 @@ export function extractConversations(project: ClaudeCodeProject): RawConversatio
       updatedAt,
       messages,
       files: allFiles,
+      totalInputTokens: totalInputTokens > 0 ? totalInputTokens : undefined,
+      totalOutputTokens: totalOutputTokens > 0 ? totalOutputTokens : undefined,
+      totalCacheCreationTokens: totalCacheCreationTokens > 0 ? totalCacheCreationTokens : undefined,
+      totalCacheReadTokens: totalCacheReadTokens > 0 ? totalCacheReadTokens : undefined,
     });
   }
 

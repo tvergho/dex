@@ -105,6 +105,33 @@ export function formatSourceInfo(source: string, model?: string | null): string 
 }
 
 /**
+ * Format a token count as a human-readable string (e.g., "1.2K", "42.5K", "1.2M")
+ */
+export function formatTokenCount(count: number | undefined): string {
+  if (count === undefined || count === 0) return '';
+  if (count < 1000) return count.toString();
+  if (count < 1000000) {
+    const k = count / 1000;
+    return k >= 10 ? `${Math.round(k)}K` : `${k.toFixed(1)}K`;
+  }
+  const m = count / 1000000;
+  return m >= 10 ? `${Math.round(m)}M` : `${m.toFixed(1)}M`;
+}
+
+/**
+ * Format input/output token pair (e.g., "42K in / 2.3K out")
+ */
+export function formatTokenPair(
+  inputTokens: number | undefined,
+  outputTokens: number | undefined
+): string {
+  const input = inputTokens || 0;
+  const output = outputTokens || 0;
+  if (input === 0 && output === 0) return '';
+  return `${formatTokenCount(input) || '0'} in / ${formatTokenCount(output) || '0'} out`;
+}
+
+/**
  * Truncate a list of file names for display
  */
 export function formatFileList(
@@ -147,6 +174,14 @@ export interface CombinedMessage {
   originalIndices: number[];
   /** Timestamp from first message */
   timestamp?: string;
+  /** Total input tokens for this message group */
+  inputTokens?: number;
+  /** Total output tokens for this message group */
+  outputTokens?: number;
+  /** Total cache creation tokens for this message group */
+  cacheCreationTokens?: number;
+  /** Total cache read tokens for this message group */
+  cacheReadTokens?: number;
 }
 
 /**
@@ -169,6 +204,10 @@ export function combineConsecutiveMessages<T extends {
   content: string;
   messageIndex: number;
   timestamp?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
 }>(messages: T[]): CombinedMessagesResult {
   if (messages.length === 0) {
     return { messages: [], indexMap: new Map() };
@@ -188,6 +227,11 @@ export function combineConsecutiveMessages<T extends {
       // Flush current group if any
       if (currentGroup.length > 0) {
         const combinedIdx = combined.length;
+        // Sum up tokens from all messages in the group
+        const totalInputTokens = currentGroup.reduce((sum, m) => sum + (m.inputTokens || 0), 0);
+        const totalOutputTokens = currentGroup.reduce((sum, m) => sum + (m.outputTokens || 0), 0);
+        const totalCacheCreationTokens = currentGroup.reduce((sum, m) => sum + (m.cacheCreationTokens || 0), 0);
+        const totalCacheReadTokens = currentGroup.reduce((sum, m) => sum + (m.cacheReadTokens || 0), 0);
         combined.push({
           messageIds: currentGroup.map(m => m.id),
           content: currentGroup.map(m => m.content).join('\n\n'),
@@ -195,6 +239,10 @@ export function combineConsecutiveMessages<T extends {
           combinedIndex: combinedIdx,
           originalIndices: currentGroup.map(m => m.messageIndex),
           timestamp: currentGroup[0]!.timestamp,
+          inputTokens: totalInputTokens > 0 ? totalInputTokens : undefined,
+          outputTokens: totalOutputTokens > 0 ? totalOutputTokens : undefined,
+          cacheCreationTokens: totalCacheCreationTokens > 0 ? totalCacheCreationTokens : undefined,
+          cacheReadTokens: totalCacheReadTokens > 0 ? totalCacheReadTokens : undefined,
         });
         // Map all original indices to this combined index
         for (const m of currentGroup) {
@@ -210,6 +258,11 @@ export function combineConsecutiveMessages<T extends {
   // Flush final group
   if (currentGroup.length > 0) {
     const combinedIdx = combined.length;
+    // Sum up tokens from all messages in the group
+    const totalInputTokens = currentGroup.reduce((sum, m) => sum + (m.inputTokens || 0), 0);
+    const totalOutputTokens = currentGroup.reduce((sum, m) => sum + (m.outputTokens || 0), 0);
+    const totalCacheCreationTokens = currentGroup.reduce((sum, m) => sum + (m.cacheCreationTokens || 0), 0);
+    const totalCacheReadTokens = currentGroup.reduce((sum, m) => sum + (m.cacheReadTokens || 0), 0);
     combined.push({
       messageIds: currentGroup.map(m => m.id),
       content: currentGroup.map(m => m.content).join('\n\n'),
@@ -217,6 +270,10 @@ export function combineConsecutiveMessages<T extends {
       combinedIndex: combinedIdx,
       originalIndices: currentGroup.map(m => m.messageIndex),
       timestamp: currentGroup[0]!.timestamp,
+      inputTokens: totalInputTokens > 0 ? totalInputTokens : undefined,
+      outputTokens: totalOutputTokens > 0 ? totalOutputTokens : undefined,
+      cacheCreationTokens: totalCacheCreationTokens > 0 ? totalCacheCreationTokens : undefined,
+      cacheReadTokens: totalCacheReadTokens > 0 ? totalCacheReadTokens : undefined,
     });
     for (const m of currentGroup) {
       indexMap.set(m.messageIndex, combinedIdx);

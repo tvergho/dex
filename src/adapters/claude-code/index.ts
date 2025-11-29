@@ -82,6 +82,10 @@ export class ClaudeCodeAdapter implements SourceAdapter {
       updatedAt,
       messageCount: raw.messages.length,
       sourceRef,
+      totalInputTokens: raw.totalInputTokens,
+      totalOutputTokens: raw.totalOutputTokens,
+      totalCacheCreationTokens: raw.totalCacheCreationTokens,
+      totalCacheReadTokens: raw.totalCacheReadTokens,
     };
 
     // Build messages (filter out empty content and sidechain messages)
@@ -94,6 +98,10 @@ export class ClaudeCodeAdapter implements SourceAdapter {
       content: msg.content,
       timestamp: msg.timestamp,
       messageIndex: index,
+      inputTokens: msg.inputTokens,
+      outputTokens: msg.outputTokens,
+      cacheCreationTokens: msg.cacheCreationTokens,
+      cacheReadTokens: msg.cacheReadTokens,
     }));
 
     // Build conversation files

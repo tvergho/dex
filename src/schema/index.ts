@@ -21,6 +21,11 @@ export const Message = z.object({
   content: z.string(),
   timestamp: z.string().datetime().optional(),
   messageIndex: z.number(),
+  // Token usage (from API response)
+  inputTokens: z.number().optional(),
+  outputTokens: z.number().optional(),
+  cacheCreationTokens: z.number().optional(), // Claude Code only
+  cacheReadTokens: z.number().optional(), // Claude Code only
 });
 export type Message = z.infer<typeof Message>;
 
@@ -50,6 +55,11 @@ export const Conversation = z.object({
   updatedAt: z.string().datetime().optional(),
   messageCount: z.number(),
   sourceRef: SourceRef,
+  // Aggregated token usage
+  totalInputTokens: z.number().optional(),
+  totalOutputTokens: z.number().optional(),
+  totalCacheCreationTokens: z.number().optional(),
+  totalCacheReadTokens: z.number().optional(),
 });
 export type Conversation = z.infer<typeof Conversation>;
 

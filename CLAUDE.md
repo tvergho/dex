@@ -117,6 +117,19 @@ Four-level navigation pattern:
 - Column names with camelCase need quotes in SQL filters: `"conversationId"`
 - No `dropIndex` method - use `createIndex` with `replace: true`
 
+### Schema Changes (Adding New Columns)
+
+LanceDB schema is defined by the first row inserted. To add new columns:
+
+1. **Update `src/schema/index.ts`** - Add fields to the Zod schema
+2. **Update adapter parsers** - Extract new data from source (e.g., `parser.ts`)
+3. **Update adapter normalizers** - Map extracted data to schema (e.g., `index.ts`)
+4. **Update `src/db/index.ts`** - Add columns to table creation placeholder rows in `ensureTables()` and any `recreate*Table()` functions
+5. **Update `src/db/repository.ts`** - Add columns to insert/upsert row objects AND to the return mappings in find/list functions
+6. **Delete database and re-sync** - `rm -rf ~/.dex/lancedb && bun run dev sync --force`
+
+**Critical**: Simply opening an existing table won't add new columns. The table must be recreated with the new schema for columns to exist.
+
 ## Embeddings
 
 Background embedding generation for semantic search:

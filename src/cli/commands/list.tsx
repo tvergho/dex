@@ -18,6 +18,7 @@ import {
   formatSourceInfo,
   truncatePath,
   formatMessageCount,
+  formatTokenPair,
 } from '../../utils/format';
 import type { Conversation } from '../../schema/index';
 
@@ -46,6 +47,7 @@ function ConversationRow({
   const timeStr = formatRelativeTime(conversation.updatedAt);
   const msgStr = `${conversation.messageCount} msg${conversation.messageCount !== 1 ? 's' : ''}`;
   const sourceName = formatSourceName(conversation.source);
+  const tokenStr = formatTokenPair(conversation.totalInputTokens, conversation.totalOutputTokens);
 
   // Truncate workspace path if needed
   const maxPathWidth = width - 6 - sourceName.length - 3;
@@ -70,6 +72,12 @@ function ConversationRow({
           <>
             <Text dimColor> · </Text>
             <Text color="magenta" dimColor={!isSelected}>{displayPath}</Text>
+          </>
+        )}
+        {tokenStr && (
+          <>
+            <Text dimColor> · </Text>
+            <Text color="cyan" dimColor={!isSelected}>{tokenStr}</Text>
           </>
         )}
       </Box>
@@ -243,7 +251,9 @@ async function plainList(limit: number, source?: string): Promise<void> {
     if (conv.workspacePath) {
       console.log(`   ${conv.workspacePath}`);
     }
-    console.log(`   ${formatMessageCount(conv.messageCount)} · ${formatRelativeTime(conv.updatedAt)}`);
+    const tokenStr = formatTokenPair(conv.totalInputTokens, conv.totalOutputTokens);
+    const tokenInfo = tokenStr ? ` · ${tokenStr}` : '';
+    console.log(`   ${formatMessageCount(conv.messageCount)} · ${formatRelativeTime(conv.updatedAt)}${tokenInfo}`);
     console.log(`   ID: ${conv.id}`);
     console.log('');
   }

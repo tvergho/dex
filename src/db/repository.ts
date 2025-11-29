@@ -123,6 +123,10 @@ export const conversationRepo = {
       updatedAt: conv.updatedAt ?? '',
       messageCount: conv.messageCount,
       sourceRefJson: JSON.stringify(conv.sourceRef),
+      totalInputTokens: conv.totalInputTokens ?? 0,
+      totalOutputTokens: conv.totalOutputTokens ?? 0,
+      totalCacheCreationTokens: conv.totalCacheCreationTokens ?? 0,
+      totalCacheReadTokens: conv.totalCacheReadTokens ?? 0,
     };
 
     if (existing.length > 0) {
@@ -151,6 +155,10 @@ export const conversationRepo = {
       updatedAt: (row.updatedAt as string) || undefined,
       messageCount: row.messageCount as number,
       sourceRef: JSON.parse(row.sourceRefJson as string) as SourceRef,
+      totalInputTokens: (row.totalInputTokens as number) || undefined,
+      totalOutputTokens: (row.totalOutputTokens as number) || undefined,
+      totalCacheCreationTokens: (row.totalCacheCreationTokens as number) || undefined,
+      totalCacheReadTokens: (row.totalCacheReadTokens as number) || undefined,
     };
   },
 
@@ -181,6 +189,10 @@ export const conversationRepo = {
       updatedAt: (row.updatedAt as string) || undefined,
       messageCount: row.messageCount as number,
       sourceRef: JSON.parse(row.sourceRefJson as string) as SourceRef,
+      totalInputTokens: (row.totalInputTokens as number) || undefined,
+      totalOutputTokens: (row.totalOutputTokens as number) || undefined,
+      totalCacheCreationTokens: (row.totalCacheCreationTokens as number) || undefined,
+      totalCacheReadTokens: (row.totalCacheReadTokens as number) || undefined,
     }));
   },
 
@@ -223,6 +235,10 @@ export const messageRepo = {
       timestamp: msg.timestamp ?? '',
       messageIndex: msg.messageIndex,
       vector: new Array(EMBEDDING_DIMENSIONS).fill(0), // Placeholder, will be updated with embeddings
+      inputTokens: msg.inputTokens ?? 0,
+      outputTokens: msg.outputTokens ?? 0,
+      cacheCreationTokens: msg.cacheCreationTokens ?? 0,
+      cacheReadTokens: msg.cacheReadTokens ?? 0,
     }));
 
     await table.add(rows);
@@ -241,6 +257,10 @@ export const messageRepo = {
       timestamp: msg.timestamp ?? '',
       messageIndex: msg.messageIndex,
       vector: new Array(EMBEDDING_DIMENSIONS).fill(0), // Placeholder, will be updated with embeddings
+      inputTokens: msg.inputTokens ?? 0,
+      outputTokens: msg.outputTokens ?? 0,
+      cacheCreationTokens: msg.cacheCreationTokens ?? 0,
+      cacheReadTokens: msg.cacheReadTokens ?? 0,
     }));
 
     await table.add(rows);
@@ -273,6 +293,10 @@ export const messageRepo = {
         content: row.content as string,
         timestamp: (row.timestamp as string) || undefined,
         messageIndex: row.messageIndex as number,
+        inputTokens: (row.inputTokens as number) || undefined,
+        outputTokens: (row.outputTokens as number) || undefined,
+        cacheCreationTokens: (row.cacheCreationTokens as number) || undefined,
+        cacheReadTokens: (row.cacheReadTokens as number) || undefined,
       }))
       .sort((a, b) => a.messageIndex - b.messageIndex);
   },

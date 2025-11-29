@@ -5,6 +5,8 @@ export interface RawBubble {
   type: 'user' | 'assistant' | 'system';
   text: string;
   files: RawFile[]; // files associated with this specific bubble
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export interface RawFile {
@@ -23,6 +25,8 @@ export interface RawConversation {
   mode?: string;
   model?: string;
   files: RawFile[];
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
 }
 
 interface FileSelection {
@@ -43,6 +47,10 @@ interface BubbleData {
   text?: string;
   relevantFiles?: string[];
   context?: ContextData;
+  tokenCount?: {
+    inputTokens?: number;
+    outputTokens?: number;
+  };
 }
 
 interface ModelConfig {
@@ -234,6 +242,8 @@ export function extractConversations(dbPath: string): RawConversation[] {
               type: mapBubbleType(item.type),
               text: item.text,
               files: bubbleFiles,
+              inputTokens: item.tokenCount?.inputTokens,
+              outputTokens: item.tokenCount?.outputTokens,
             });
             bubbleDataList.push(item);
           }
@@ -252,6 +262,8 @@ export function extractConversations(dbPath: string): RawConversation[] {
                 type: mapBubbleType(header.type ?? bubbleData.type),
                 text: bubbleData.text,
                 files: bubbleFiles,
+                inputTokens: bubbleData.tokenCount?.inputTokens,
+                outputTokens: bubbleData.tokenCount?.outputTokens,
               });
               bubbleDataList.push(bubbleData);
             }
@@ -287,6 +299,8 @@ export function extractConversations(dbPath: string): RawConversation[] {
                     type: mapBubbleType(header.type ?? bubbleData.type),
                     text: bubbleData.text,
                     files: bubbleFiles,
+                    inputTokens: bubbleData.tokenCount?.inputTokens,
+                    outputTokens: bubbleData.tokenCount?.outputTokens,
                   });
                   bubbleDataList.push(bubbleData);
                 }
@@ -309,6 +323,10 @@ export function extractConversations(dbPath: string): RawConversation[] {
       const workspacePath = extractWorkspacePath(filePaths);
       const projectName = extractProjectName(workspacePath);
 
+      // Calculate total token usage
+      const totalInputTokens = bubbles.reduce((sum, b) => sum + (b.inputTokens || 0), 0);
+      const totalOutputTokens = bubbles.reduce((sum, b) => sum + (b.outputTokens || 0), 0);
+
       conversations.push({
         composerId,
         name: data.name || 'Untitled',
@@ -320,6 +338,8 @@ export function extractConversations(dbPath: string): RawConversation[] {
         mode: data.forceMode,
         model: data.modelConfig?.modelName,
         files,
+        totalInputTokens: totalInputTokens > 0 ? totalInputTokens : undefined,
+        totalOutputTokens: totalOutputTokens > 0 ? totalOutputTokens : undefined,
       });
     }
   } finally {

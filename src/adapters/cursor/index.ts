@@ -77,6 +77,8 @@ export class CursorAdapter implements SourceAdapter {
       updatedAt,
       messageCount: raw.bubbles.length,
       sourceRef,
+      totalInputTokens: raw.totalInputTokens,
+      totalOutputTokens: raw.totalOutputTokens,
     };
 
     // Build messages (filter out empty content)
@@ -90,6 +92,8 @@ export class CursorAdapter implements SourceAdapter {
           content: bubble.text,
           timestamp: undefined,
           messageIndex: index,
+          inputTokens: bubble.inputTokens,
+          outputTokens: bubble.outputTokens,
         };
       });
 
