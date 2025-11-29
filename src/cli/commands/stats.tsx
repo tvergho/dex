@@ -11,6 +11,7 @@ import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index';
+import { messageRepo, filesRepo, messageFilesRepo, conversationRepo } from '../../db/repository';
 import {
   createPeriodFilter,
   getOverviewStats,
@@ -39,8 +40,10 @@ import { formatLargeNumber } from '../components/MetricCard';
 import { Sparkline } from '../components/Sparkline';
 import { ProgressBar } from '../components/HorizontalBar';
 import { ActivityHeatmap, HourlyActivity, WeeklyActivity } from '../components/ActivityHeatmap';
-import { formatSourceLabel } from '../../utils/format';
-import type { Conversation } from '../../schema/index';
+import { ConversationView } from '../components/ConversationView';
+import { MessageDetailView } from '../components/MessageDetailView';
+import { formatSourceLabel, combineConsecutiveMessages, type CombinedMessage } from '../../utils/format';
+import type { Conversation, ConversationFile, MessageFile } from '../../schema/index';
 
 interface StatsOptions {
   period?: string;
@@ -91,15 +94,21 @@ function getSourceColor(source: string): string {
   return 'yellow'; // codex and others
 }
 
+type FocusSection = 'recent' | 'top' | null;
+
 function OverviewTab({
   data,
   width,
   period,
+  focusSection,
+  selectedIndex,
 }: {
   data: AllData;
   width: number;
   height: number;
   period: number;
+  focusSection: FocusSection;
+  selectedIndex: number;
 }) {
   const { overview, daily, sources, streak, lines, recentConversations } = data;
 
@@ -247,19 +256,23 @@ function OverviewTab({
           <Text bold color="white">Recent Conversations</Text>
           <Box><Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text></Box>
           {recentConversations.slice(0, 5).map((conv, idx) => {
+            const isSelected = focusSection === 'recent' && idx === selectedIndex;
             const timeAgo = formatRelativeTime(conv.createdAt).padEnd(8);
             const source = formatSourceLabel(conv.source).padEnd(13);
             const tokenStr = formatLargeNumber(conv.totalTokens).padStart(7);
-            const titleWidth = width - 8 - 13 - 9 - 2;
+            const titleWidth = width - 8 - 13 - 9 - 5;
             const title = conv.title.length > titleWidth
               ? conv.title.slice(0, titleWidth - 1) + '…'
               : conv.title;
 
             return (
               <Box key={idx}>
+                <Text backgroundColor={isSelected ? 'cyan' : undefined} color={isSelected ? 'black' : undefined}>
+                  {isSelected ? ' ▸ ' : '   '}
+                </Text>
                 <Text color="gray">{timeAgo}</Text>
                 <Text color={getSourceColor(conv.source)}>{source}</Text>
-                <Text>{title.padEnd(titleWidth)}</Text>
+                <Text bold={isSelected}>{title.padEnd(titleWidth)}</Text>
                 <Text color="cyan">{tokenStr}</Text>
               </Box>
             );
@@ -274,10 +287,14 @@ function TokensTab({
   data,
   width,
   height,
+  focusSection,
+  selectedIndex,
 }: {
   data: AllData;
   width: number;
   height: number;
+  focusSection: FocusSection;
+  selectedIndex: number;
 }) {
   const { overview, daily, models, topConversations, lines, cache, sources } = data;
 
@@ -408,23 +425,27 @@ function TokensTab({
         {topConversations.length > 0 ? (
           <Box flexDirection="column">
             {topConversations.slice(0, 5).map((conv, idx) => {
+              const isSelected = focusSection === 'top' && idx === selectedIndex;
               const total = (conv.totalInputTokens || 0) + (conv.totalOutputTokens || 0) +
                 (conv.totalCacheCreationTokens || 0) + (conv.totalCacheReadTokens || 0);
               const proportion = maxConvTokens > 0 ? total / maxConvTokens : 0;
               const barWidth = Math.max(15, Math.floor(width * 0.35));
               const filledWidth = Math.max(1, Math.round(proportion * barWidth));
               const emptyWidth = barWidth - filledWidth;
-              const titleWidth = width - barWidth - 12;
+              const titleWidth = width - barWidth - 15;
               const title = conv.title.length > titleWidth
                 ? conv.title.slice(0, titleWidth - 1) + '…'
                 : conv.title;
 
               return (
                 <Box key={idx}>
+                  <Text backgroundColor={isSelected ? 'cyan' : undefined} color={isSelected ? 'black' : undefined}>
+                    {isSelected ? ' ▸ ' : '   '}
+                  </Text>
                   <Text color="cyan">{formatLargeNumber(total).padStart(6)}  </Text>
                   <Text color="cyan">{'█'.repeat(filledWidth)}</Text>
                   <Text color="gray">{'░'.repeat(emptyWidth)}</Text>
-                  <Text>  {title}</Text>
+                  <Text bold={isSelected}>  {title}</Text>
                 </Box>
               );
             })}
@@ -509,6 +530,8 @@ function ActivityTab({
 
 // --- Main Stats App ---
 
+type ViewMode = 'dashboard' | 'conversation' | 'message';
+
 function StatsApp({ period }: { period: number }) {
   const { exit } = useApp();
   const { width, height } = useScreenSize();
@@ -516,6 +539,22 @@ function StatsApp({ period }: { period: number }) {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [data, setData] = useState<AllData | null>(null);
+
+  // Navigation state
+  const [viewMode, setViewMode] = useState<ViewMode>('dashboard');
+  const [focusSection, setFocusSection] = useState<FocusSection>(null);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  // Conversation view state
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  const [combinedMessages, setCombinedMessages] = useState<CombinedMessage[]>([]);
+  const [conversationFiles, setConversationFiles] = useState<ConversationFile[]>([]);
+  const [conversationMessageFiles, setConversationMessageFiles] = useState<MessageFile[]>([]);
+  const [conversationScrollOffset, setConversationScrollOffset] = useState(0);
+  const [selectedMessageIndex, setSelectedMessageIndex] = useState(0);
+
+  // Message detail view state
+  const [messageScrollOffset, setMessageScrollOffset] = useState(0);
 
   useEffect(() => {
     async function loadData() {
@@ -560,27 +599,214 @@ function StatsApp({ period }: { period: number }) {
     loadData();
   }, [period]);
 
+  // Get max index for current section
+  const getMaxIndex = () => {
+    if (!data) return 0;
+    if (focusSection === 'recent') return Math.min(4, data.recentConversations.length - 1);
+    if (focusSection === 'top') return Math.min(4, data.topConversations.length - 1);
+    return 0;
+  };
+
+  // Load conversation data when entering conversation view
+  async function loadConversation(conv: Conversation) {
+    setSelectedConversation(conv);
+    setViewMode('conversation');
+    setConversationScrollOffset(0);
+    setSelectedMessageIndex(0);
+
+    // Load messages and files
+    const [msgs, files, msgFiles] = await Promise.all([
+      messageRepo.findByConversation(conv.id),
+      filesRepo.findByConversation(conv.id),
+      messageFilesRepo.findByConversation(conv.id),
+    ]);
+
+    const { messages: combined } = combineConsecutiveMessages(msgs);
+    setCombinedMessages(combined);
+    setConversationFiles(files);
+    setConversationMessageFiles(msgFiles);
+  }
+
+  // Handle Enter key to view selected conversation
+  async function handleEnterKey() {
+    if (!data) return;
+
+    let conversationId: string | null = null;
+
+    if (focusSection === 'recent' && data.recentConversations[selectedIndex]) {
+      conversationId = data.recentConversations[selectedIndex]!.id;
+    } else if (focusSection === 'top' && data.topConversations[selectedIndex]) {
+      conversationId = data.topConversations[selectedIndex]!.id;
+    }
+
+    if (conversationId) {
+      // Fetch full conversation from database
+      const fullConv = await conversationRepo.findById(conversationId);
+      if (fullConv) {
+        await loadConversation(fullConv);
+      }
+    }
+  }
+
   useInput((input, key) => {
-    if (input === 'q' || key.escape) {
+    // Handle message detail view mode
+    if (viewMode === 'message' && combinedMessages.length > 0) {
+      const currentMessage = combinedMessages[selectedMessageIndex];
+      if (key.escape || key.backspace || key.delete || input === 'b') {
+        setViewMode('conversation');
+        setMessageScrollOffset(0);
+        return;
+      }
+
+      if (input === 'q') {
+        exit();
+        return;
+      }
+
+      if (input === 'j' || key.downArrow) {
+        const lines = currentMessage?.content.split('\n') || [];
+        const maxOffset = Math.max(0, lines.length - (height - 8));
+        setMessageScrollOffset(o => Math.min(o + 1, maxOffset));
+      } else if (input === 'k' || key.upArrow) {
+        setMessageScrollOffset(o => Math.max(o - 1, 0));
+      } else if (input === 'g') {
+        setMessageScrollOffset(0);
+      } else if (input === 'G') {
+        const lines = currentMessage?.content.split('\n') || [];
+        setMessageScrollOffset(Math.max(0, lines.length - (height - 8)));
+      } else if (input === 'n') {
+        // Next message
+        if (selectedMessageIndex < combinedMessages.length - 1) {
+          setSelectedMessageIndex(i => i + 1);
+          setMessageScrollOffset(0);
+        }
+      } else if (input === 'p') {
+        // Previous message
+        if (selectedMessageIndex > 0) {
+          setSelectedMessageIndex(i => i - 1);
+          setMessageScrollOffset(0);
+        }
+      }
+      return;
+    }
+
+    // Handle conversation view mode
+    if (viewMode === 'conversation') {
+      if (key.escape || key.backspace || key.delete || input === 'b') {
+        setViewMode('dashboard');
+        setSelectedConversation(null);
+        setCombinedMessages([]);
+        setConversationFiles([]);
+        setConversationMessageFiles([]);
+        return;
+      }
+
+      if (input === 'q') {
+        exit();
+        return;
+      }
+
+      // Scroll in conversation view
+      const headerHeight = 6;
+      const footerHeight = 2;
+      const messagesPerPage = Math.max(1, Math.floor((height - headerHeight - footerHeight) / 3));
+      const maxOffset = Math.max(0, combinedMessages.length - messagesPerPage);
+
+      if (input === 'j' || key.downArrow) {
+        const newIdx = Math.min(selectedMessageIndex + 1, combinedMessages.length - 1);
+        setSelectedMessageIndex(newIdx);
+        // Adjust scroll to keep selected message visible
+        if (newIdx >= conversationScrollOffset + messagesPerPage) {
+          setConversationScrollOffset(Math.min(newIdx - messagesPerPage + 1, maxOffset));
+        }
+      } else if (input === 'k' || key.upArrow) {
+        const newIdx = Math.max(selectedMessageIndex - 1, 0);
+        setSelectedMessageIndex(newIdx);
+        if (newIdx < conversationScrollOffset) {
+          setConversationScrollOffset(newIdx);
+        }
+      } else if (input === 'g') {
+        setConversationScrollOffset(0);
+        setSelectedMessageIndex(0);
+      } else if (input === 'G') {
+        setConversationScrollOffset(maxOffset);
+        setSelectedMessageIndex(combinedMessages.length - 1);
+      } else if (key.return) {
+        // Open message detail view
+        setViewMode('message');
+        setMessageScrollOffset(0);
+      }
+      return;
+    }
+
+    // Dashboard mode
+    if (input === 'q') {
       exit();
       return;
     }
 
-    // Tab switching
-    if (input === '1') setActiveTab('overview');
-    if (input === '2') setActiveTab('tokens');
-    if (input === '3') setActiveTab('activity');
+    // If in a focused section, handle navigation
+    if (focusSection !== null) {
+      if (key.escape || key.backspace || key.delete) {
+        setFocusSection(null);
+        setSelectedIndex(0);
+        return;
+      }
 
-    // Arrow key tab navigation
-    if (key.leftArrow || input === 'h') {
-      const tabs: TabId[] = ['overview', 'tokens', 'activity'];
-      const idx = tabs.indexOf(activeTab);
-      setActiveTab(tabs[(idx - 1 + tabs.length) % tabs.length]!);
+      if (input === 'j' || key.downArrow) {
+        setSelectedIndex(i => Math.min(i + 1, getMaxIndex()));
+        return;
+      }
+      if (input === 'k' || key.upArrow) {
+        setSelectedIndex(i => Math.max(i - 1, 0));
+        return;
+      }
+      if (key.return) {
+        handleEnterKey();
+        return;
+      }
     }
-    if (key.rightArrow || input === 'l') {
-      const tabs: TabId[] = ['overview', 'tokens', 'activity'];
-      const idx = tabs.indexOf(activeTab);
-      setActiveTab(tabs[(idx + 1) % tabs.length]!);
+
+    // Tab switching (only when not in a section)
+    if (focusSection === null) {
+      if (input === '1') {
+        setActiveTab('overview');
+        return;
+      }
+      if (input === '2') {
+        setActiveTab('tokens');
+        return;
+      }
+      if (input === '3') {
+        setActiveTab('activity');
+        return;
+      }
+
+      // Arrow key tab navigation
+      if (key.leftArrow || input === 'h') {
+        const tabs: TabId[] = ['overview', 'tokens', 'activity'];
+        const idx = tabs.indexOf(activeTab);
+        setActiveTab(tabs[(idx - 1 + tabs.length) % tabs.length]!);
+        return;
+      }
+      if (key.rightArrow || input === 'l') {
+        const tabs: TabId[] = ['overview', 'tokens', 'activity'];
+        const idx = tabs.indexOf(activeTab);
+        setActiveTab(tabs[(idx + 1) % tabs.length]!);
+        return;
+      }
+
+      // Enter to focus on the relevant section
+      if (key.return || input === 'j' || key.downArrow) {
+        if (activeTab === 'overview' && data?.recentConversations.length) {
+          setFocusSection('recent');
+          setSelectedIndex(0);
+        } else if (activeTab === 'tokens' && data?.topConversations.length) {
+          setFocusSection('top');
+          setSelectedIndex(0);
+        }
+        return;
+      }
     }
   });
 
@@ -620,6 +846,128 @@ function StatsApp({ period }: { period: number }) {
   const footerHeight = 2;
   const contentHeight = height - headerHeight - footerHeight;
 
+  // Render message detail view
+  if (viewMode === 'message' && selectedConversation && combinedMessages[selectedMessageIndex]) {
+    return (
+      <Box width={width} height={height} flexDirection="column">
+        {/* Header */}
+        <Box flexDirection="column">
+          <Box paddingX={1}>
+            <Text bold color="white">Stats Dashboard</Text>
+            <Text dimColor> · Last {period} days</Text>
+            <Text dimColor> › </Text>
+            <Text color="cyan">Message</Text>
+          </Box>
+          <Box paddingX={1}>
+            <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
+          </Box>
+        </Box>
+
+        {/* Message Content */}
+        <Box flexDirection="column" flexGrow={1} paddingX={1} height={contentHeight + 2}>
+          <MessageDetailView
+            message={combinedMessages[selectedMessageIndex]!}
+            messageFiles={conversationMessageFiles}
+            width={width - 2}
+            height={contentHeight + 2}
+            scrollOffset={messageScrollOffset}
+            query=""
+          />
+        </Box>
+
+        {/* Footer */}
+        <Box flexDirection="column">
+          <Box paddingX={1}>
+            <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
+          </Box>
+          <Box paddingX={1}>
+            <Text>
+              <Text color="white">j/k</Text><Text dimColor>: scroll · </Text>
+              <Text color="white">n/p</Text><Text dimColor>: next/prev · </Text>
+              <Text color="white">g/G</Text><Text dimColor>: top/bottom · </Text>
+              <Text color="white">esc/b</Text><Text dimColor>: back · </Text>
+              <Text color="white">q</Text><Text dimColor>: quit</Text>
+            </Text>
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
+
+  // Render conversation view
+  if (viewMode === 'conversation' && selectedConversation) {
+    return (
+      <Box width={width} height={height} flexDirection="column">
+        {/* Header */}
+        <Box flexDirection="column">
+          <Box paddingX={1}>
+            <Text bold color="white">Stats Dashboard</Text>
+            <Text dimColor> · Last {period} days</Text>
+            <Text dimColor> › </Text>
+            <Text color="cyan">Conversation</Text>
+          </Box>
+          <Box paddingX={1}>
+            <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
+          </Box>
+        </Box>
+
+        {/* Conversation Content */}
+        <Box flexDirection="column" flexGrow={1} paddingX={1} height={contentHeight + 2}>
+          <ConversationView
+            conversation={selectedConversation}
+            messages={combinedMessages}
+            files={conversationFiles}
+            messageFiles={conversationMessageFiles}
+            width={width - 2}
+            height={contentHeight + 2}
+            scrollOffset={conversationScrollOffset}
+            selectedIndex={selectedMessageIndex}
+          />
+        </Box>
+
+        {/* Footer */}
+        <Box flexDirection="column">
+          <Box paddingX={1}>
+            <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
+          </Box>
+          <Box paddingX={1}>
+            <Text>
+              <Text color="white">j/k</Text><Text dimColor>: select · </Text>
+              <Text color="white">Enter</Text><Text dimColor>: view full · </Text>
+              <Text color="white">g/G</Text><Text dimColor>: top/bottom · </Text>
+              <Text color="white">esc/b</Text><Text dimColor>: back · </Text>
+              <Text color="white">q</Text><Text dimColor>: quit</Text>
+            </Text>
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
+
+  // Dashboard footer text based on state
+  const getFooterText = () => {
+    if (focusSection !== null) {
+      return (
+        <Text>
+          <Text color="white">j/k</Text><Text dimColor>: select · </Text>
+          <Text color="white">Enter</Text><Text dimColor>: view · </Text>
+          <Text color="white">esc</Text><Text dimColor>: back · </Text>
+          <Text color="white">q</Text><Text dimColor>: quit</Text>
+        </Text>
+      );
+    }
+    const hasConversations = (activeTab === 'overview' && data.recentConversations.length > 0) ||
+                            (activeTab === 'tokens' && data.topConversations.length > 0);
+    return (
+      <Text>
+        <Text color="white">1-3</Text><Text dimColor>: tabs · </Text>
+        <Text color="white">h/l</Text><Text dimColor>: navigate · </Text>
+        {hasConversations && <><Text color="white">Enter/j</Text><Text dimColor>: browse conversations · </Text></>}
+        <Text color="white">q</Text><Text dimColor>: quit</Text>
+      </Text>
+    );
+  };
+
   return (
     <Box width={width} height={height} flexDirection="column">
       {/* Header */}
@@ -630,7 +978,7 @@ function StatsApp({ period }: { period: number }) {
         </Box>
         {/* Tab bar */}
         <Box paddingX={1}>
-          {tabs.map((tab, idx) => (
+          {tabs.map((tab) => (
             <Box key={tab.id} marginRight={2}>
               <Text
                 bold={activeTab === tab.id}
@@ -650,10 +998,23 @@ function StatsApp({ period }: { period: number }) {
       {/* Content */}
       <Box flexDirection="column" flexGrow={1} paddingX={1} height={contentHeight}>
         {activeTab === 'overview' && (
-          <OverviewTab data={data} width={width - 2} height={contentHeight} period={period} />
+          <OverviewTab
+            data={data}
+            width={width - 2}
+            height={contentHeight}
+            period={period}
+            focusSection={focusSection}
+            selectedIndex={selectedIndex}
+          />
         )}
         {activeTab === 'tokens' && (
-          <TokensTab data={data} width={width - 2} height={contentHeight} />
+          <TokensTab
+            data={data}
+            width={width - 2}
+            height={contentHeight}
+            focusSection={focusSection}
+            selectedIndex={selectedIndex}
+          />
         )}
         {activeTab === 'activity' && (
           <ActivityTab data={data} width={width - 2} height={contentHeight} period={period} />
@@ -666,11 +1027,7 @@ function StatsApp({ period }: { period: number }) {
           <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
         </Box>
         <Box paddingX={1}>
-          <Text>
-            <Text color="white">1-3</Text><Text dimColor>: tabs · </Text>
-            <Text color="white">h/l</Text><Text dimColor>: navigate · </Text>
-            <Text color="white">q</Text><Text dimColor>: quit</Text>
-          </Text>
+          {getFooterText()}
         </Box>
       </Box>
     </Box>
