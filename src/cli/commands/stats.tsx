@@ -556,9 +556,12 @@ function StatsApp({ period }: { period: number }) {
   // Message detail view state
   const [messageScrollOffset, setMessageScrollOffset] = useState(0);
 
-  // Use ref to track message count to avoid stale closures in useInput
+  // Use refs to track values and avoid stale closures in useInput
   const messageCountRef = useRef(0);
   messageCountRef.current = combinedMessages.length;
+  
+  const scrollOffsetRef = useRef(0);
+  scrollOffsetRef.current = conversationScrollOffset;
 
   // Clamp selectedMessageIndex when messages change to ensure it's always valid
   useEffect(() => {
@@ -736,9 +739,11 @@ function StatsApp({ period }: { period: number }) {
           const maxIdx = messageCountRef.current - 1;
           if (prev >= maxIdx) return prev; // Already at end
           const newIdx = prev + 1;
-          // Adjust scroll to keep selected message visible
-          if (newIdx >= conversationScrollOffset + messagesPerPage) {
-            setConversationScrollOffset(Math.min(newIdx - messagesPerPage + 1, maxOffset));
+          // Adjust scroll to keep selected message visible (use ref for current offset)
+          const currentOffset = scrollOffsetRef.current;
+          if (newIdx >= currentOffset + messagesPerPage) {
+            const newOffset = Math.min(newIdx - messagesPerPage + 1, maxOffset);
+            setConversationScrollOffset(newOffset);
           }
           return newIdx;
         });
@@ -746,7 +751,9 @@ function StatsApp({ period }: { period: number }) {
         setSelectedMessageIndex(prev => {
           if (prev <= 0) return prev; // Already at start
           const newIdx = prev - 1;
-          if (newIdx < conversationScrollOffset) {
+          // Use ref for current offset
+          const currentOffset = scrollOffsetRef.current;
+          if (newIdx < currentOffset) {
             setConversationScrollOffset(newIdx);
           }
           return newIdx;
