@@ -61,6 +61,8 @@ bun run dev list        # List all conversations
 bun run dev show <id>   # Show a specific conversation
 bun run dev status      # Check embedding progress
 bun run typecheck       # Run TypeScript type checking
+bun run lint            # Run ESLint
+bun run lint:fix        # Auto-fix lint issues
 ```
 
 ## Architecture Patterns
