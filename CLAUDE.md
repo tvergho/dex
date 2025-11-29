@@ -118,7 +118,7 @@ Four-level navigation pattern:
 ## Embeddings
 
 Background embedding generation for semantic search:
-- Uses `nomic-embed-text-v1.5` (1024 dimensions) via llama-server
+- Uses `Qwen3-Embedding-0.6B` (1024 dimensions) via llama-server
 - Spawned automatically after sync completes
 - Progress tracked in `~/.dex/embedding-progress.json`
 - Model stored in `~/.dex/models/`
