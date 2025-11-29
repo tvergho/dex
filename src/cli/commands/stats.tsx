@@ -37,6 +37,7 @@ import { MetricRow, formatLargeNumber, formatTokenDisplay, formatLinesDisplay } 
 import { Sparkline } from '../components/Sparkline';
 import { HorizontalBar, ProgressBar, type BarItem } from '../components/HorizontalBar';
 import { ActivityHeatmap, HourlyActivity, WeeklyActivity } from '../components/ActivityHeatmap';
+import { formatSourceLabel } from '../../utils/format';
 import type { Conversation } from '../../schema/index';
 
 interface StatsOptions {
@@ -161,101 +162,175 @@ function TokensTab({
   width: number;
   height: number;
 }) {
-  const { models, topConversations, lines, cache, sources } = data;
+  const { overview, daily, models, topConversations, lines, cache, sources } = data;
 
-  // Model bars
-  const modelBars: BarItem[] = models.slice(0, 5).map(m => ({
-    label: m.model.length > 20 ? m.model.slice(0, 19) + '…' : m.model,
-    value: m.inputTokens + m.outputTokens,
-    color: 'cyan',
-  }));
+  // Calculate totals
+  const totalTokens = overview.totalInputTokens + overview.totalOutputTokens;
+  const inputPercent = totalTokens > 0 ? Math.round((overview.totalInputTokens / totalTokens) * 100) : 0;
+  const outputPercent = totalTokens > 0 ? 100 - inputPercent : 0;
+
+  // Token trend data
+  const tokenTrend = daily.map(d => d.tokens);
 
   // Check if we have any Claude Code/Codex sources for cache stats
   const hasCacheData = sources.some(s => s.source === 'claude-code' || s.source === 'codex');
 
+  // Calculate widths for two-column layout
+  const halfWidth = Math.floor((width - 4) / 2);
+
+  // Max token value for top conversations bars (including cache tokens)
+  const maxConvTokens = topConversations.length > 0
+    ? (topConversations[0]!.totalInputTokens || 0) + (topConversations[0]!.totalOutputTokens || 0) +
+      (topConversations[0]!.totalCacheCreationTokens || 0) + (topConversations[0]!.totalCacheReadTokens || 0)
+    : 0;
+
   return (
     <Box flexDirection="column">
+      {/* Summary line */}
+      <Box marginBottom={1}>
+        <Text bold color="white">Total: {formatLargeNumber(totalTokens)} tokens</Text>
+        <Text color="gray">    </Text>
+        <Text color="cyan">Input: {formatLargeNumber(overview.totalInputTokens)}</Text>
+        <Text color="gray">    </Text>
+        <Text color="magenta">Output: {formatLargeNumber(overview.totalOutputTokens)}</Text>
+        <Text color="gray">    </Text>
+        <Text color="gray">Trend: </Text>
+        <Sparkline data={tokenTrend} width={20} color="cyan" showTrend />
+      </Box>
+
       {/* Models breakdown */}
       <Box flexDirection="column" marginBottom={1}>
         <Text bold color="white">Token Usage by Model</Text>
-        {modelBars.length > 0 ? (
-          <HorizontalBar items={modelBars} width={Math.min(width, 60)} maxLabelWidth={22} />
+        <Box paddingX={0}>
+          <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
+        </Box>
+        {models.length > 0 ? (
+          <Box flexDirection="column">
+            {models.slice(0, 5).map((m, idx) => {
+              const total = m.inputTokens + m.outputTokens;
+              const maxModelTokens = (models[0]!.inputTokens || 0) + (models[0]!.outputTokens || 0);
+              const proportion = maxModelTokens > 0 ? total / maxModelTokens : 0;
+              const labelWidth = 38;
+              const barWidth = Math.max(20, width - labelWidth - 10);
+              const filledWidth = Math.max(1, Math.round(proportion * barWidth));
+              const emptyWidth = barWidth - filledWidth;
+              const sourceLabel = formatSourceLabel(m.source);
+              const modelLabel = `${m.model} (${sourceLabel})`;
+              const displayLabel = modelLabel.length > labelWidth ? modelLabel.slice(0, labelWidth - 1) + '…' : modelLabel.padEnd(labelWidth);
+
+              return (
+                <Box key={idx}>
+                  <Text>{displayLabel} </Text>
+                  <Text color="cyan">{'█'.repeat(filledWidth)}</Text>
+                  <Text color="gray">{'░'.repeat(emptyWidth)}</Text>
+                  <Text color="gray"> {formatLargeNumber(total).padStart(6)}</Text>
+                </Box>
+              );
+            })}
+          </Box>
         ) : (
-          <Text dimColor>No model data available</Text>
+          <Text color="gray">No model data available</Text>
         )}
       </Box>
 
-      {/* Lines Generated */}
-      <Box flexDirection="column" marginBottom={1}>
-        <Text bold color="white">Lines Generated</Text>
-        <Box>
-          <Box width={20}>
-            <Text color="green">+{formatLargeNumber(lines.totalLinesAdded)}</Text>
-            <Text dimColor> added</Text>
+      {/* Two-column layout: Token Breakdown + Cache Efficiency */}
+      <Box marginBottom={1}>
+        {/* Token Breakdown */}
+        <Box flexDirection="column" width={halfWidth} marginRight={2}>
+          <Text bold color="white">Token Breakdown</Text>
+          <Box paddingX={0}>
+            <Text color="gray">{'─'.repeat(Math.max(0, halfWidth - 2))}</Text>
           </Box>
-          <Box width={20}>
-            <Text color="red">-{formatLargeNumber(lines.totalLinesRemoved)}</Text>
-            <Text dimColor> removed</Text>
-          </Box>
-          <Box>
-            <Text color={lines.netLines >= 0 ? 'green' : 'red'}>
-              {lines.netLines >= 0 ? '+' : ''}{formatLargeNumber(lines.netLines)}
-            </Text>
-            <Text dimColor> net</Text>
+          <Box flexDirection="column">
+            <Box>
+              <Text>Input    </Text>
+              <ProgressBar value={inputPercent / 100} width={halfWidth - 20} color="cyan" showPercent={false} />
+            </Box>
+            <Box>
+              <Text color="cyan">{formatLargeNumber(overview.totalInputTokens).padStart(9)}</Text>
+              <Text color="gray"> ({inputPercent}%)</Text>
+            </Box>
+            <Box marginTop={1}>
+              <Text>Output   </Text>
+              <ProgressBar value={outputPercent / 100} width={halfWidth - 20} color="magenta" showPercent={false} />
+            </Box>
+            <Box>
+              <Text color="magenta">{formatLargeNumber(overview.totalOutputTokens).padStart(9)}</Text>
+              <Text color="gray"> ({outputPercent}%)</Text>
+            </Box>
           </Box>
         </Box>
-        {lines.topConversationsByLines.length > 0 && (
-          <Box flexDirection="column" marginTop={1}>
-            <Text dimColor>Top by lines added:</Text>
-            {lines.topConversationsByLines.slice(0, 3).map((conv, idx) => (
-              <Box key={idx}>
-                <Text color="green">+{String(conv.linesAdded).padStart(5)} </Text>
-                <Text>{conv.title.slice(0, 40)}{conv.title.length > 40 ? '…' : ''}</Text>
-              </Box>
-            ))}
-          </Box>
-        )}
-      </Box>
 
-      {/* Cache Efficiency - Claude Code/Codex only */}
-      {hasCacheData && (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text bold color="white">Cache Efficiency <Text dimColor>(Claude Code/Codex only)</Text></Text>
-          <Box>
-            <Box width={30}>
-              <Text dimColor>Hit Rate: </Text>
-              <ProgressBar value={cache.hitRate} width={15} color="green" />
+        {/* Cache Efficiency - Claude Code/Codex only */}
+        {hasCacheData && (
+          <Box flexDirection="column" width={halfWidth}>
+            <Text bold color="white">Cache Efficiency <Text color="gray">(Claude Code/Codex)</Text></Text>
+            <Box paddingX={0}>
+              <Text color="gray">{'─'.repeat(Math.max(0, halfWidth - 2))}</Text>
             </Box>
-          </Box>
-          <Box marginTop={1}>
-            <Box width={20}>
-              <Text dimColor>Cache Read: </Text>
+            <Box>
+              <Text>Hit Rate </Text>
+              <ProgressBar value={cache.hitRate} width={halfWidth - 18} color="green" />
+            </Box>
+            <Box marginTop={1}>
+              <Text color="gray">Read: </Text>
               <Text color="green">{formatLargeNumber(cache.cacheRead)}</Text>
-            </Box>
-            <Box width={20}>
-              <Text dimColor>Cache Create: </Text>
+              <Text color="gray">    Created: </Text>
               <Text color="yellow">{formatLargeNumber(cache.cacheCreation)}</Text>
             </Box>
           </Box>
-        </Box>
-      )}
-
-      {/* Top conversations */}
-      <Box flexDirection="column">
-        <Text bold color="white">Top Conversations by Tokens</Text>
-        {topConversations.length > 0 ? (
-          topConversations.slice(0, 5).map((conv, idx) => {
-            const total = (conv.totalInputTokens || 0) + (conv.totalOutputTokens || 0);
-            return (
-              <Box key={idx}>
-                <Text color="cyan">{formatLargeNumber(total).padStart(6)} </Text>
-                <Text>{conv.title.slice(0, 50)}{conv.title.length > 50 ? '…' : ''}</Text>
-              </Box>
-            );
-          })
-        ) : (
-          <Text dimColor>No conversation data</Text>
         )}
+      </Box>
+
+      {/* Top conversations with visual bars */}
+      <Box flexDirection="column" marginBottom={1}>
+        <Text bold color="white">Top Conversations by Tokens</Text>
+        <Box paddingX={0}>
+          <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
+        </Box>
+        {topConversations.length > 0 ? (
+          <Box flexDirection="column">
+            {topConversations.slice(0, 5).map((conv, idx) => {
+              const total = (conv.totalInputTokens || 0) + (conv.totalOutputTokens || 0) +
+                (conv.totalCacheCreationTokens || 0) + (conv.totalCacheReadTokens || 0);
+              const proportion = maxConvTokens > 0 ? total / maxConvTokens : 0;
+              const barWidth = Math.max(15, Math.floor(width * 0.35));
+              const filledWidth = Math.max(1, Math.round(proportion * barWidth));
+              const emptyWidth = barWidth - filledWidth;
+              const titleWidth = width - barWidth - 12;
+              const title = conv.title.length > titleWidth
+                ? conv.title.slice(0, titleWidth - 1) + '…'
+                : conv.title;
+
+              return (
+                <Box key={idx}>
+                  <Text color="cyan">{formatLargeNumber(total).padStart(6)}  </Text>
+                  <Text color="cyan">{'█'.repeat(filledWidth)}</Text>
+                  <Text color="gray">{'░'.repeat(emptyWidth)}</Text>
+                  <Text>  {title}</Text>
+                </Box>
+              );
+            })}
+          </Box>
+        ) : (
+          <Text color="gray">No conversation data</Text>
+        )}
+      </Box>
+
+      {/* Lines Generated - compact footer */}
+      <Box paddingX={0}>
+        <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
+      </Box>
+      <Box>
+        <Text color="gray">Lines Generated    </Text>
+        <Text color="green">+{formatLargeNumber(lines.totalLinesAdded)}</Text>
+        <Text color="gray"> added    </Text>
+        <Text color="red">−{formatLargeNumber(lines.totalLinesRemoved)}</Text>
+        <Text color="gray"> removed    </Text>
+        <Text color={lines.netLines >= 0 ? 'green' : 'red'}>
+          {lines.netLines >= 0 ? '+' : ''}{formatLargeNumber(lines.netLines)}
+        </Text>
+        <Text color="gray"> net</Text>
       </Box>
     </Box>
   );

@@ -30,6 +30,7 @@ export interface SourceStats {
 
 export interface ModelStats {
   model: string;
+  source: string;
   conversations: number;
   inputTokens: number;
   outputTokens: number;
@@ -150,7 +151,9 @@ export async function getDailyActivity(period: PeriodFilter): Promise<DayActivit
 
     existing.conversations += 1;
     existing.messages += conv.messageCount || 0;
-    existing.tokens += (conv.totalInputTokens || 0) + (conv.totalOutputTokens || 0);
+    // Include cache tokens for total context processed
+    existing.tokens += (conv.totalInputTokens || 0) + (conv.totalOutputTokens || 0) +
+      (conv.totalCacheCreationTokens || 0) + (conv.totalCacheReadTokens || 0);
     existing.linesAdded += conv.totalLinesAdded || 0;
     existing.linesRemoved += conv.totalLinesRemoved || 0;
 
@@ -181,7 +184,9 @@ export async function getStatsBySource(period: PeriodFilter): Promise<SourceStat
 
     existing.conversations += 1;
     existing.messages += conv.messageCount || 0;
-    existing.tokens += (conv.totalInputTokens || 0) + (conv.totalOutputTokens || 0);
+    // Include cache tokens for total context processed
+    existing.tokens += (conv.totalInputTokens || 0) + (conv.totalOutputTokens || 0) +
+      (conv.totalCacheCreationTokens || 0) + (conv.totalCacheReadTokens || 0);
 
     bySource.set(source, existing);
   }
@@ -197,26 +202,32 @@ export async function getStatsByModel(period: PeriodFilter): Promise<ModelStats[
 
   const filtered = rows.filter(r => isInPeriod(r.createdAt, period));
 
-  const byModel = new Map<string, ModelStats>();
+  // Group by model+source combination
+  const byModelSource = new Map<string, ModelStats>();
 
   for (const conv of filtered) {
     const model = conv.model || '(unknown)';
-    const existing = byModel.get(model) || {
+    const source = conv.source || 'unknown';
+    const key = `${model}::${source}`;
+    const existing = byModelSource.get(key) || {
       model,
+      source,
       conversations: 0,
       inputTokens: 0,
       outputTokens: 0,
     };
 
     existing.conversations += 1;
-    existing.inputTokens += conv.totalInputTokens || 0;
+    // Include cache tokens in input for total context processed
+    existing.inputTokens += (conv.totalInputTokens || 0) +
+      (conv.totalCacheCreationTokens || 0) + (conv.totalCacheReadTokens || 0);
     existing.outputTokens += conv.totalOutputTokens || 0;
 
-    byModel.set(model, existing);
+    byModelSource.set(key, existing);
   }
 
   // Sort by total tokens descending
-  return Array.from(byModel.values()).sort(
+  return Array.from(byModelSource.values()).sort(
     (a, b) => (b.inputTokens + b.outputTokens) - (a.inputTokens + a.outputTokens)
   );
 }
@@ -231,10 +242,12 @@ export async function getTopConversationsByTokens(
 
   const filtered = rows.filter(r => isInPeriod(r.createdAt, period));
 
-  // Sort by total tokens descending
+  // Sort by total tokens descending (including cache tokens)
   filtered.sort((a, b) => {
-    const aTokens = (a.totalInputTokens || 0) + (a.totalOutputTokens || 0);
-    const bTokens = (b.totalInputTokens || 0) + (b.totalOutputTokens || 0);
+    const aTokens = (a.totalInputTokens || 0) + (a.totalOutputTokens || 0) +
+      (a.totalCacheCreationTokens || 0) + (a.totalCacheReadTokens || 0);
+    const bTokens = (b.totalInputTokens || 0) + (b.totalOutputTokens || 0) +
+      (b.totalCacheCreationTokens || 0) + (b.totalCacheReadTokens || 0);
     return bTokens - aTokens;
   });
 

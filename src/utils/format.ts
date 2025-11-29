@@ -29,6 +29,17 @@ export function formatSourceName(source: string): string {
 }
 
 /**
+ * Format source name for display with proper capitalization
+ * (e.g., "claude-code" -> "Claude Code", "codex" -> "Codex")
+ */
+export function formatSourceLabel(source: string): string {
+  if (source === 'claude-code') return 'Claude Code';
+  if (source === 'codex') return 'Codex';
+  if (source === 'cursor') return 'Cursor';
+  return formatSourceName(source);
+}
+
+/**
  * Truncate a path from the left, preserving the end with an ellipsis prefix
  */
 export function truncatePath(path: string, maxLen: number): string {
