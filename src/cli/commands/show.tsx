@@ -102,12 +102,12 @@ function ShowApp({ conversationId }: { conversationId: string }) {
     loadConversation();
   }, [conversationId]);
 
-  const headerHeight = 4;
   const footerHeight = 2;
-  const _availableHeight = height - headerHeight - footerHeight;
+  const dynamicHeaderHeight = 6 + (files.length > 0 ? 1 : 0);
+  const messagesPerPage = Math.max(1, Math.floor((height - dynamicHeaderHeight - footerHeight) / 4));
 
-  // Simple line-based scrolling
-  const maxOffset = Math.max(0, messages.length - 1);
+  // Scroll offset should stop when last message is visible at bottom
+  const maxOffset = Math.max(0, messages.length - messagesPerPage);
 
   useInput((input, key) => {
     if (input === 'q' || key.escape) {
@@ -163,11 +163,8 @@ function ShowApp({ conversationId }: { conversationId: string }) {
     return parts[parts.length - 1] || f.filePath;
   });
 
-  // Adjust header height based on content
-  const dynamicHeaderHeight = 6 + (fileNames.length > 0 ? 1 : 0);
-
   // Show messages starting from scrollOffset
-  const visibleMessages = messages.slice(scrollOffset, scrollOffset + Math.max(1, Math.floor((height - dynamicHeaderHeight - footerHeight) / 4)));
+  const visibleMessages = messages.slice(scrollOffset, scrollOffset + messagesPerPage);
 
   return (
     <Box width={width} height={height} flexDirection="column">
