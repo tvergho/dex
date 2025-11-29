@@ -126,6 +126,30 @@ function SearchApp({
 
   const expandedResult = expandedIndex !== null ? response?.results[expandedIndex] : null;
 
+  // Map a match to its combined message index (fallback to original index)
+  const getCombinedIndexForMatch = (match: { messageIndex: number } | undefined): number | null => {
+    if (!match) return null;
+    return messageIndexMap.get(match.messageIndex) ?? match.messageIndex;
+  };
+
+  // Find the next/previous match that points to a different combined message
+  const findNextDistinctMatch = (startIdx: number, direction: 1 | -1): number => {
+    if (!expandedResult) return startIdx;
+    const matches = expandedResult.matches;
+    const currentCombined = getCombinedIndexForMatch(matches[startIdx]);
+
+    let i = startIdx + direction;
+    while (i >= 0 && i < matches.length) {
+      const combinedIdx = getCombinedIndexForMatch(matches[i]);
+      if (combinedIdx !== currentCombined) {
+        return i;
+      }
+      i += direction;
+    }
+
+    return startIdx;
+  };
+
   // Load conversation messages when entering conversation view
   const loadConversation = async (conversationId: string, targetMessageIndex?: number) => {
     const msgs = await messageRepo.findByConversation(conversationId);
@@ -237,20 +261,21 @@ function SearchApp({
       } else if (input === 'j' || key.downArrow) {
         const maxIdx = expandedResult.matches.length - 1;
         setExpandedSelectedMatch((i) => {
-          const newIdx = Math.min(i + 1, maxIdx);
+          const newIdx = Math.min(findNextDistinctMatch(i, 1), maxIdx);
           // Adjust scroll if needed
           const matchesPerPage = Math.max(1, Math.floor((height - 8) / 4));
-          if (newIdx >= expandedScrollOffset + matchesPerPage) {
-            setExpandedScrollOffset((o) => Math.min(o + 1, Math.max(0, expandedResult.matches.length - matchesPerPage)));
-          }
+          const maxOffset = Math.max(0, expandedResult.matches.length - matchesPerPage);
+          const desiredOffset = Math.min(Math.max(newIdx - matchesPerPage + 1, 0), maxOffset);
+          setExpandedScrollOffset((o) => Math.min(Math.max(o, desiredOffset), maxOffset));
           return newIdx;
         });
       } else if (input === 'k' || key.upArrow) {
         setExpandedSelectedMatch((i) => {
-          const newIdx = Math.max(i - 1, 0);
-          if (newIdx < expandedScrollOffset) {
-            setExpandedScrollOffset((o) => Math.max(o - 1, 0));
-          }
+          const newIdx = Math.max(findNextDistinctMatch(i, -1), 0);
+          const matchesPerPage = Math.max(1, Math.floor((height - 8) / 4));
+          const maxOffset = Math.max(0, expandedResult.matches.length - matchesPerPage);
+          const desiredOffset = Math.min(Math.max(newIdx, 0), maxOffset);
+          setExpandedScrollOffset((o) => Math.min(Math.max(desiredOffset, 0), maxOffset));
           return newIdx;
         });
       } else if (key.return) {
