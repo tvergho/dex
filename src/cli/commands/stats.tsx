@@ -563,6 +563,9 @@ function StatsApp({ period }: { period: number }) {
   const scrollOffsetRef = useRef(0);
   scrollOffsetRef.current = conversationScrollOffset;
 
+  const hasFilesRef = useRef(false);
+  hasFilesRef.current = conversationFiles.length > 0;
+
   // Clamp selectedMessageIndex when messages change to ensure it's always valid
   useEffect(() => {
     if (combinedMessages.length > 0 && selectedMessageIndex >= combinedMessages.length) {
@@ -727,9 +730,11 @@ function StatsApp({ period }: { period: number }) {
       }
 
       // Scroll in conversation view
-      const headerHeight = 6;
-      const footerHeight = 2;
-      const messagesPerPage = Math.max(1, Math.floor((height - headerHeight - footerHeight) / 3));
+      // Match ConversationView's calculation: it receives (height - 4) and uses headerHeight of 5-6
+      // So available height is roughly (height - 4 - 5) = (height - 9), or (height - 10) with files
+      const conversationViewHeight = height - 4; // what we pass to ConversationView
+      const convHeaderHeight = 5 + (hasFilesRef.current ? 1 : 0);
+      const messagesPerPage = Math.max(1, Math.floor((conversationViewHeight - convHeaderHeight) / 3));
       const maxMessageIndex = messageCount - 1;
       const maxOffset = Math.max(0, messageCount - messagesPerPage);
 
