@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 import { Command } from 'commander';
-import { syncCommand } from './cli/commands/sync.js';
-import { searchCommand } from './cli/commands/search.js';
-import { listCommand } from './cli/commands/list.js';
-import { showCommand } from './cli/commands/show.js';
-import { statusCommand } from './cli/commands/status.js';
+import { syncCommand } from './cli/commands/sync';
+import { searchCommand } from './cli/commands/search';
+import { listCommand } from './cli/commands/list';
+import { showCommand } from './cli/commands/show';
+import { statusCommand } from './cli/commands/status';
 
 const program = new Command()
   .name('dex')

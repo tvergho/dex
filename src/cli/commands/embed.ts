@@ -6,7 +6,7 @@
  * Uses llama-server for fast batch embedding with fallback to node-llama-cpp
  */
 
-import { connect, rebuildVectorIndex, rebuildFtsIndex, getMessagesTable } from '../../db/index.js';
+import { connect, rebuildVectorIndex, rebuildFtsIndex, getMessagesTable } from '../../db/index';
 import {
   downloadModel,
   initEmbeddings,
@@ -17,14 +17,14 @@ import {
   getEmbeddingProgress,
   isEmbeddingInProgress,
   EMBEDDING_DIMENSIONS,
-} from '../../embeddings/index.js';
+} from '../../embeddings/index';
 import {
   isLlamaServerInstalled,
   downloadLlamaServer,
   startLlamaServer,
   stopLlamaServer,
   embedBatchViaServer,
-} from '../../embeddings/llama-server.js';
+} from '../../embeddings/llama-server';
 import { existsSync } from 'fs';
 
 // Batch size for server - moderate due to long texts

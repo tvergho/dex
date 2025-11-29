@@ -11,8 +11,8 @@ import {
   getRoleColor,
   getRoleLabel,
   type CombinedMessage,
-} from '../../utils/format.js';
-import type { Conversation, ConversationFile, MessageFile } from '../../schema/index.js';
+} from '../../utils/format';
+import type { Conversation, ConversationFile, MessageFile } from '../../schema/index';
 
 export interface ConversationViewProps {
   conversation: Conversation;

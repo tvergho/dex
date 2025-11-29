@@ -1,14 +1,14 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { HighlightedText } from './HighlightedText.js';
+import { HighlightedText } from './HighlightedText';
 import {
   formatPaginationInfo,
   getFileName,
   getRoleColor,
   getRoleLabel,
   type CombinedMessage,
-} from '../../utils/format.js';
-import type { MessageFile } from '../../schema/index.js';
+} from '../../utils/format';
+import type { MessageFile } from '../../schema/index';
 
 export interface MessageDetailViewProps {
   message: CombinedMessage;

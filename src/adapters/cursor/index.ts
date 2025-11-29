@@ -1,8 +1,8 @@
 import { createHash } from 'crypto';
-import { getGlobalDatabase } from './paths.js';
-import { extractConversations, type RawConversation } from './parser.js';
-import type { Conversation, Message, SourceRef, ToolCall, ConversationFile, MessageFile } from '../../schema/index.js';
-import type { SourceAdapter, SourceLocation, NormalizedConversation } from '../types.js';
+import { getGlobalDatabase } from './paths';
+import { extractConversations, type RawConversation } from './parser';
+import type { Conversation, Message, SourceRef, ToolCall, ConversationFile, MessageFile } from '../../schema/index';
+import type { SourceAdapter, SourceLocation, NormalizedConversation } from '../types';
 
 export class CursorAdapter implements SourceAdapter {
   name = 'cursor' as const;

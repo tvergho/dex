@@ -5,7 +5,7 @@ import {
   getSyncStateTable,
   getFilesTable,
   getMessageFilesTable,
-} from './index.js';
+} from './index';
 import type {
   Conversation,
   Message,
@@ -17,8 +17,8 @@ import type {
   SearchResponse,
   ConversationFile,
   MessageFile,
-} from '../schema/index.js';
-import { EMBEDDING_DIMENSIONS, embedQuery } from '../embeddings/index.js';
+} from '../schema/index';
+import { EMBEDDING_DIMENSIONS, embedQuery } from '../embeddings/index';
 
 // Helper to group array by key
 function groupBy<T>(array: T[], keyFn: (item: T) => string): Record<string, T[]> {

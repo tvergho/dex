@@ -10,16 +10,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
-import { connect } from '../../db/index.js';
-import { conversationRepo } from '../../db/repository.js';
+import { connect } from '../../db/index';
+import { conversationRepo } from '../../db/repository';
 import {
   formatRelativeTime,
   formatSourceName,
   formatSourceInfo,
   truncatePath,
   formatMessageCount,
-} from '../../utils/format.js';
-import type { Conversation } from '../../schema/index.js';
+} from '../../utils/format';
+import type { Conversation } from '../../schema/index';
 
 interface ListOptions {
   limit?: string;

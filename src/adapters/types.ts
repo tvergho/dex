@@ -1,4 +1,4 @@
-import type { Conversation, Message, ToolCall, SourceRef, SourceType, ConversationFile, MessageFile } from '../schema/index.js';
+import type { Conversation, Message, ToolCall, SourceRef, SourceType, ConversationFile, MessageFile } from '../schema/index';
 
 export interface SourceLocation {
   source: SourceType;

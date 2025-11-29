@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { HighlightedText } from './HighlightedText.js';
+import { HighlightedText } from './HighlightedText';
 import {
   formatSourceInfo,
   truncatePath,
@@ -11,8 +11,8 @@ import {
   formatFileList,
   getRoleColor,
   getRoleLabel,
-} from '../../utils/format.js';
-import type { ConversationResult, ConversationFile, MessageFile } from '../../schema/index.js';
+} from '../../utils/format';
+import type { ConversationResult, ConversationFile, MessageFile } from '../../schema/index';
 
 export interface MatchesViewProps {
   result: ConversationResult;

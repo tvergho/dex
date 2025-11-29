@@ -1,13 +1,13 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { HighlightedText } from './HighlightedText.js';
+import { HighlightedText } from './HighlightedText';
 import {
   formatRelativeTime,
   formatSourceName,
   truncatePath,
   formatMatchCount,
-} from '../../utils/format.js';
-import type { ConversationResult } from '../../schema/index.js';
+} from '../../utils/format';
+import type { ConversationResult } from '../../schema/index';
 
 export interface ResultRowProps {
   result: ConversationResult;

@@ -1,7 +1,7 @@
 import * as lancedb from '@lancedb/lancedb';
-import { getLanceDBPath } from '../utils/config.js';
+import { getLanceDBPath } from '../utils/config';
 import type { Table } from '@lancedb/lancedb';
-import { EMBEDDING_DIMENSIONS } from '../embeddings/index.js';
+import { EMBEDDING_DIMENSIONS } from '../embeddings/index';
 
 let db: lancedb.Connection | null = null;
 

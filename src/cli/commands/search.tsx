@@ -13,14 +13,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
-import { connect } from '../../db/index.js';
-import { search, messageRepo, filesRepo, messageFilesRepo } from '../../db/repository.js';
+import { connect } from '../../db/index';
+import { search, messageRepo, filesRepo, messageFilesRepo } from '../../db/repository';
 import {
   ResultRow,
   MatchesView,
   ConversationView,
   MessageDetailView,
-} from '../components/index.js';
+} from '../components/index';
 import {
   formatRelativeTime,
   formatSourceName,
@@ -28,8 +28,8 @@ import {
   formatMessageCount,
   combineConsecutiveMessages,
   type CombinedMessage,
-} from '../../utils/format.js';
-import type { SearchResponse, ConversationFile, MessageFile } from '../../schema/index.js';
+} from '../../utils/format';
+import type { SearchResponse, ConversationFile, MessageFile } from '../../schema/index';
 
 interface SearchOptions {
   limit?: string;

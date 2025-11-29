@@ -1,5 +1,5 @@
-export { HighlightedText, type HighlightedTextProps } from './HighlightedText.js';
-export { ResultRow, type ResultRowProps } from './ResultRow.js';
-export { MatchesView, type MatchesViewProps } from './MatchesView.js';
-export { ConversationView, type ConversationViewProps } from './ConversationView.js';
-export { MessageDetailView, type MessageDetailViewProps } from './MessageDetailView.js';
+export { HighlightedText, type HighlightedTextProps } from './HighlightedText';
+export { ResultRow, type ResultRowProps } from './ResultRow';
+export { MatchesView, type MatchesViewProps } from './MatchesView';
+export { ConversationView, type ConversationViewProps } from './ConversationView';
+export { MessageDetailView, type MessageDetailViewProps } from './MessageDetailView';

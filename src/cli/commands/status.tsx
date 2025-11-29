@@ -8,7 +8,7 @@
 
 import React from 'react';
 import { render, Box, Text } from 'ink';
-import { getEmbeddingProgress, getModelPath, type EmbeddingProgress } from '../../embeddings/index.js';
+import { getEmbeddingProgress, getModelPath, type EmbeddingProgress } from '../../embeddings/index';
 import { existsSync, statSync } from 'fs';
 
 function formatBytes(bytes: number): string {

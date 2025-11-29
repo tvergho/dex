@@ -10,9 +10,9 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
-import { connect } from '../../db/index.js';
-import { conversationRepo, messageRepo, filesRepo, messageFilesRepo } from '../../db/repository.js';
-import type { Conversation, Message, ConversationFile, MessageFile } from '../../schema/index.js';
+import { connect } from '../../db/index';
+import { conversationRepo, messageRepo, filesRepo, messageFilesRepo } from '../../db/repository';
+import type { Conversation, Message, ConversationFile, MessageFile } from '../../schema/index';
 
 function MessageView({
   message,

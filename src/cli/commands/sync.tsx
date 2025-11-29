@@ -12,12 +12,12 @@ import { render, Box, Text } from 'ink';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { adapters } from '../../adapters/index.js';
-import type { SourceLocation, NormalizedConversation } from '../../adapters/types.js';
+import { adapters } from '../../adapters/index';
+import type { SourceLocation, NormalizedConversation } from '../../adapters/types';
 import {
   connect,
   rebuildFtsIndex,
-} from '../../db/index.js';
+} from '../../db/index';
 import {
   conversationRepo,
   messageRepo,
@@ -25,12 +25,12 @@ import {
   syncStateRepo,
   filesRepo,
   messageFilesRepo,
-} from '../../db/repository.js';
+} from '../../db/repository';
 import {
   setEmbeddingProgress,
   clearEmbeddingProgress,
   isEmbeddingInProgress,
-} from '../../embeddings/index.js';
+} from '../../embeddings/index';
 
 interface SyncProgress {
   phase:

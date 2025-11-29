@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, createWriteStream, chmodSync, unlinkSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { spawn, ChildProcess } from 'child_process';
-import { getDataDir } from '../utils/config.js';
+import { getDataDir } from '../utils/config';
 
 // GitHub API for fetching latest release
 const GITHUB_API_LATEST = 'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest';
