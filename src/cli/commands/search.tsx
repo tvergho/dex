@@ -157,13 +157,18 @@ function SearchApp({
     setCombinedMessages(combined);
     setMessageIndexMap(indexMap);
 
+    // Use same calculation as ConversationView component
+    // Note: conversationFiles may not be loaded yet, so use 6 as safe estimate (5 base + 1 for files)
+    const headerHeight = 6;
+    const messagesPerPage = Math.max(1, Math.floor((availableHeight - headerHeight) / 3));
+
     // Scroll to show the highlighted message and select it
     if (targetMessageIndex !== undefined) {
       // Convert original messageIndex to combined index
       const combinedIdx = indexMap.get(targetMessageIndex) ?? 0;
-      const messagesPerPage = Math.max(1, Math.floor((height - 6) / 3));
       const targetScroll = Math.max(0, combinedIdx - Math.floor(messagesPerPage / 2));
-      setConversationScrollOffset(Math.min(targetScroll, Math.max(0, combined.length - messagesPerPage)));
+      const maxScrollOffset = Math.max(0, combined.length - messagesPerPage);
+      setConversationScrollOffset(Math.min(targetScroll, maxScrollOffset));
       setHighlightMessageIndex(combinedIdx);
       setSelectedMessageIndex(combinedIdx);
     } else {
@@ -213,6 +218,11 @@ function SearchApp({
       }
     } else if (viewMode === 'conversation' && expandedResult) {
       // Conversation view navigation
+      // Use same calculation as ConversationView component
+      const headerHeight = 5 + (conversationFiles.length > 0 ? 1 : 0);
+      const messagesPerPage = Math.max(1, Math.floor((availableHeight - headerHeight) / 3));
+      const maxScrollOffset = Math.max(0, combinedMessages.length - messagesPerPage);
+
       if (key.escape || key.backspace || key.delete) {
         setViewMode('matches');
         setCombinedMessages([]);
@@ -223,9 +233,8 @@ function SearchApp({
         const newIdx = Math.min(selectedMessageIndex + 1, combinedMessages.length - 1);
         setSelectedMessageIndex(newIdx);
         // Adjust scroll to keep selected message visible
-        const messagesPerPage = Math.max(1, Math.floor((height - 6) / 3));
         if (newIdx >= conversationScrollOffset + messagesPerPage) {
-          setConversationScrollOffset(Math.min(newIdx - messagesPerPage + 1, Math.max(0, combinedMessages.length - messagesPerPage)));
+          setConversationScrollOffset(Math.min(newIdx - messagesPerPage + 1, maxScrollOffset));
         }
       } else if (input === 'k' || key.upArrow) {
         const newIdx = Math.max(selectedMessageIndex - 1, 0);
@@ -237,8 +246,7 @@ function SearchApp({
         setConversationScrollOffset(0);
         setSelectedMessageIndex(0);
       } else if (input === 'G') {
-        const messagesPerPage = Math.max(1, Math.floor((height - 6) / 3));
-        setConversationScrollOffset(Math.max(0, combinedMessages.length - messagesPerPage));
+        setConversationScrollOffset(maxScrollOffset);
         setSelectedMessageIndex(combinedMessages.length - 1);
       } else if (key.return) {
         // Open message detail view
