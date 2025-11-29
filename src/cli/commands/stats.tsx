@@ -706,21 +706,35 @@ function StatsApp({ period }: { period: number }) {
         return;
       }
 
+      // Guard against empty messages
+      if (combinedMessages.length === 0) {
+        return;
+      }
+
       // Scroll in conversation view
       const headerHeight = 6;
       const footerHeight = 2;
       const messagesPerPage = Math.max(1, Math.floor((height - headerHeight - footerHeight) / 3));
+      const maxMessageIndex = combinedMessages.length - 1;
       const maxOffset = Math.max(0, combinedMessages.length - messagesPerPage);
 
       if (input === 'j' || key.downArrow) {
-        const newIdx = Math.min(selectedMessageIndex + 1, combinedMessages.length - 1);
+        // Stop at the last message
+        if (selectedMessageIndex >= maxMessageIndex) {
+          return;
+        }
+        const newIdx = selectedMessageIndex + 1;
         setSelectedMessageIndex(newIdx);
         // Adjust scroll to keep selected message visible
         if (newIdx >= conversationScrollOffset + messagesPerPage) {
           setConversationScrollOffset(Math.min(newIdx - messagesPerPage + 1, maxOffset));
         }
       } else if (input === 'k' || key.upArrow) {
-        const newIdx = Math.max(selectedMessageIndex - 1, 0);
+        // Stop at the first message
+        if (selectedMessageIndex <= 0) {
+          return;
+        }
+        const newIdx = selectedMessageIndex - 1;
         setSelectedMessageIndex(newIdx);
         if (newIdx < conversationScrollOffset) {
           setConversationScrollOffset(newIdx);
@@ -730,7 +744,7 @@ function StatsApp({ period }: { period: number }) {
         setSelectedMessageIndex(0);
       } else if (input === 'G') {
         setConversationScrollOffset(maxOffset);
-        setSelectedMessageIndex(combinedMessages.length - 1);
+        setSelectedMessageIndex(maxMessageIndex);
       } else if (key.return) {
         // Open message detail view
         setViewMode('message');
