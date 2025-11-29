@@ -7,7 +7,7 @@
  * Or use --summary for quick non-interactive output
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index';
@@ -556,6 +556,17 @@ function StatsApp({ period }: { period: number }) {
   // Message detail view state
   const [messageScrollOffset, setMessageScrollOffset] = useState(0);
 
+  // Use ref to track message count to avoid stale closures in useInput
+  const messageCountRef = useRef(0);
+  messageCountRef.current = combinedMessages.length;
+
+  // Clamp selectedMessageIndex when messages change to ensure it's always valid
+  useEffect(() => {
+    if (combinedMessages.length > 0 && selectedMessageIndex >= combinedMessages.length) {
+      setSelectedMessageIndex(combinedMessages.length - 1);
+    }
+  }, [combinedMessages.length, selectedMessageIndex]);
+
   useEffect(() => {
     async function loadData() {
       try {
@@ -706,8 +717,9 @@ function StatsApp({ period }: { period: number }) {
         return;
       }
 
-      // Guard against empty messages
-      if (combinedMessages.length === 0) {
+      // Guard against empty messages - use ref for latest count
+      const messageCount = messageCountRef.current;
+      if (messageCount === 0) {
         return;
       }
 
@@ -715,13 +727,15 @@ function StatsApp({ period }: { period: number }) {
       const headerHeight = 6;
       const footerHeight = 2;
       const messagesPerPage = Math.max(1, Math.floor((height - headerHeight - footerHeight) / 3));
-      const maxMessageIndex = combinedMessages.length - 1;
-      const maxOffset = Math.max(0, combinedMessages.length - messagesPerPage);
+      const maxMessageIndex = messageCount - 1;
+      const maxOffset = Math.max(0, messageCount - messagesPerPage);
 
       if (input === 'j' || key.downArrow) {
-        // Use functional update to get latest state when holding key
+        // Use functional update with fresh bounds check
         setSelectedMessageIndex(prev => {
-          const newIdx = Math.min(prev + 1, maxMessageIndex);
+          const maxIdx = messageCountRef.current - 1;
+          if (prev >= maxIdx) return prev; // Already at end
+          const newIdx = prev + 1;
           // Adjust scroll to keep selected message visible
           if (newIdx >= conversationScrollOffset + messagesPerPage) {
             setConversationScrollOffset(Math.min(newIdx - messagesPerPage + 1, maxOffset));
@@ -729,9 +743,9 @@ function StatsApp({ period }: { period: number }) {
           return newIdx;
         });
       } else if (input === 'k' || key.upArrow) {
-        // Use functional update to get latest state when holding key
         setSelectedMessageIndex(prev => {
-          const newIdx = Math.max(prev - 1, 0);
+          if (prev <= 0) return prev; // Already at start
+          const newIdx = prev - 1;
           if (newIdx < conversationScrollOffset) {
             setConversationScrollOffset(newIdx);
           }
