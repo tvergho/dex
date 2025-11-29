@@ -1,15 +1,20 @@
 /**
  * ActivityHeatmap component - GitHub-style contribution heatmap
- * Uses Unicode block characters to show activity intensity
+ *
+ * Design: iOS GitHub widget aesthetic
+ * - Visible empty cells (dim gray) for structure
+ * - 2-char wide cells for square proportions
+ * - Green color gradient for intensity
+ * - Generous spacing that fills terminal width
  */
 
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { DayActivity } from '../../db/analytics';
 
-// Intensity blocks from empty to full (2-char width for better visibility)
-const BLOCKS_2CHAR = ['  ', '░░', '▒▒', '▓▓', '██'];
-const BLOCKS_1CHAR = [' ', '░', '▒', '▓', '█'];
+// Block characters - filled for active cells, light shade for empty
+const BLOCK_FILLED = '█';
+const BLOCK_EMPTY = '░';
 
 // Day of week labels (starting Sunday)
 const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -26,6 +31,28 @@ export interface ActivityHeatmapProps {
 }
 
 /**
+ * Get cell character and style based on intensity
+ * 0 = empty (░ in gray)
+ * 1-4 = filled (█ in increasing green intensity)
+ */
+function getCellInfo(intensity: number): { char: string; color: string; dimColor?: boolean; bold?: boolean } {
+  switch (intensity) {
+    case 0:
+      return { char: BLOCK_EMPTY, color: 'gray' };
+    case 1:
+      return { char: BLOCK_FILLED, color: 'green', dimColor: true };
+    case 2:
+      return { char: BLOCK_FILLED, color: 'green' };
+    case 3:
+      return { char: BLOCK_FILLED, color: 'greenBright' };
+    case 4:
+      return { char: BLOCK_FILLED, color: 'greenBright', bold: true };
+    default:
+      return { char: BLOCK_EMPTY, color: 'gray' };
+  }
+}
+
+/**
  * Generate a complete date range for the heatmap
  */
 function generateDateRange(weeks: number): string[] {
@@ -33,13 +60,8 @@ function generateDateRange(weeks: number): string[] {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Start from the most recent Sunday
-  const currentDay = today.getDay();
-  const endDate = new Date(today);
-
-  // Go back to fill in the weeks
   const totalDays = weeks * 7;
-  const startDate = new Date(endDate);
+  const startDate = new Date(today);
   startDate.setDate(startDate.getDate() - totalDays + 1);
 
   // Adjust to start on Sunday
@@ -48,9 +70,8 @@ function generateDateRange(weeks: number): string[] {
     startDate.setDate(startDate.getDate() - startDay);
   }
 
-  // Generate all dates
   const current = new Date(startDate);
-  while (current <= endDate) {
+  while (current <= today) {
     dates.push(current.toISOString().split('T')[0]!);
     current.setDate(current.getDate() + 1);
   }
@@ -81,7 +102,6 @@ function getMetricValue(activity: DayActivity | undefined, metric: string): numb
 function getIntensity(value: number, maxValue: number): number {
   if (value === 0 || maxValue === 0) return 0;
   const normalized = value / maxValue;
-  // Use quartiles for intensity
   if (normalized >= 0.75) return 4;
   if (normalized >= 0.5) return 3;
   if (normalized >= 0.25) return 2;
@@ -89,40 +109,38 @@ function getIntensity(value: number, maxValue: number): number {
 }
 
 /**
- * Get month labels positioned above the grid
+ * Get month labels positioned proportionally across total width
  */
-function getMonthLabels(dates: string[], startWeek: number, numWeeks: number, cellWidth: number): { month: string; position: number }[] {
+function getMonthLabels(
+  dates: string[],
+  numWeeks: number,
+  totalWidth: number
+): { month: string; position: number }[] {
   const labels: { month: string; position: number }[] = [];
   let lastMonth = -1;
 
-  for (let weekIdx = startWeek; weekIdx < numWeeks; weekIdx++) {
-    const dateIdx = weekIdx * 7; // Sunday of this week
+  for (let weekIdx = 0; weekIdx < numWeeks; weekIdx++) {
+    const dateIdx = weekIdx * 7;
     if (dateIdx >= dates.length) break;
 
     const date = new Date(dates[dateIdx]!);
     const month = date.getMonth();
 
     if (month !== lastMonth) {
-      // Only add label if there's enough space from the previous one
-      const position = (weekIdx - startWeek) * cellWidth;
+      const position = Math.floor((weekIdx / numWeeks) * totalWidth);
       const lastLabel = labels[labels.length - 1];
-      if (!lastLabel || position >= lastLabel.position + lastLabel.month.length + 1) {
-        labels.push({
-          month: MONTH_NAMES[month]!,
-          position,
-        });
-        // Only update lastMonth when we actually add a label
-        // This ensures we don't skip months that couldn't fit
+
+      if (!lastLabel || position >= lastLabel.position + lastLabel.month.length + 2) {
+        labels.push({ month: MONTH_NAMES[month]!, position });
         lastMonth = month;
       }
     }
   }
-
   return labels;
 }
 
 /**
- * Render GitHub-style activity heatmap with month labels and 2-char cells
+ * Render GitHub-style activity heatmap
  */
 export function ActivityHeatmap({
   data,
@@ -161,7 +179,7 @@ export function ActivityHeatmap({
     grid[dayOfWeek]!.push(intensity);
   }
 
-  // Ensure all rows have same length (pad with 0)
+  // Ensure all rows have same length
   const numWeeks = Math.ceil(dates.length / 7);
   for (let day = 0; day < 7; day++) {
     while (grid[day]!.length < numWeeks) {
@@ -169,32 +187,32 @@ export function ActivityHeatmap({
     }
   }
 
-  // Calculate which weeks we can show given width
-  // 2-char cells + 1-char space between weeks + 3-char label (e.g., "S  ")
-  const labelWidth = 3;
-  const cellWidth = 2;
-  const spacing = 1; // Space between week columns
-  const effectiveCellWidth = cellWidth + spacing;
-  const availableWidth = width - labelWidth;
-  const maxDisplayWeeks = Math.floor(availableWidth / effectiveCellWidth);
-  const displayWeeks = Math.min(numWeeks, maxDisplayWeeks);
-  const startWeek = Math.max(0, numWeeks - displayWeeks);
+  // Fixed layout: 2-char cells with 1-char spacing (compact like GitHub)
+  const cellWidth = 2;  // Two characters for square proportions
+  const spacing = 1;    // Fixed 1-char spacing between cells
 
-  // Get month labels (use effective width for positioning)
-  const monthLabels = getMonthLabels(dates, startWeek, numWeeks, effectiveCellWidth);
+  // Get month labels positioned across full width
+  const totalGridWidth = numWeeks * (cellWidth + spacing);
+  const monthLabels = getMonthLabels(dates, numWeeks, totalGridWidth);
+
+  // Count active days
+  let activeDays = 0;
+  for (const date of dates) {
+    if (getMetricValue(activityMap.get(date), metric) > 0) {
+      activeDays++;
+    }
+  }
 
   return (
     <Box flexDirection="column">
       {/* Month labels row */}
       <Box>
-        <Text>{'   '}</Text>
+        <Text>{'  '}</Text>
         <Text>
           {(() => {
-            // Build the month label string
             let labelStr = '';
             let lastEnd = 0;
             for (const { month, position } of monthLabels) {
-              // Add spaces to reach the position
               const spacesNeeded = position - lastEnd;
               if (spacesNeeded > 0) {
                 labelStr += ' '.repeat(spacesNeeded);
@@ -207,16 +225,26 @@ export function ActivityHeatmap({
         </Text>
       </Box>
 
-      {/* Grid */}
+      {/* Grid - 2-char cells with fixed spacing */}
       {grid.map((row, dayIdx) => (
         <Box key={dayIdx}>
-          <Text color="gray">{DAY_LABELS[dayIdx]}  </Text>
+          <Text color="gray">{DAY_LABELS[dayIdx]} </Text>
           <Text>
-            {row.slice(startWeek).map((intensity, weekIdx) => (
-              <Text key={weekIdx} color={intensity > 0 ? 'green' : 'gray'}>
-                {BLOCKS_2CHAR[intensity]}{' '}
-              </Text>
-            ))}
+            {row.map((intensity, weekIdx) => {
+              const info = getCellInfo(intensity);
+              const cellStr = info.char.repeat(cellWidth) + ' '.repeat(spacing);
+
+              return (
+                <Text
+                  key={weekIdx}
+                  color={info.color}
+                  dimColor={info.dimColor}
+                  bold={info.bold}
+                >
+                  {cellStr}
+                </Text>
+              );
+            })}
           </Text>
         </Box>
       ))}
@@ -225,12 +253,20 @@ export function ActivityHeatmap({
       {showLegend && (
         <Box marginTop={1}>
           <Text color="gray">Less </Text>
-          {BLOCKS_2CHAR.map((block, idx) => (
-            <Text key={idx} color={idx > 0 ? 'green' : 'gray'}>
-              {block}
-            </Text>
-          ))}
-          <Text color="gray"> More</Text>
+          {[0, 1, 2, 3, 4].map((intensity) => {
+            const info = getCellInfo(intensity);
+            return (
+              <Text
+                key={intensity}
+                color={info.color}
+                dimColor={info.dimColor}
+                bold={info.bold}
+              >
+                {info.char}
+              </Text>
+            );
+          })}
+          <Text color="gray"> More  {activeDays} active days</Text>
         </Box>
       )}
     </Box>
@@ -256,12 +292,11 @@ export function HourlyActivity({ data, width, color = 'cyan' }: HourlyActivityPr
     return <Text color="gray">No activity data</Text>;
   }
 
-  // Group hours into 8 buckets (3 hours each)
   const buckets: { label: string; value: number }[] = [
-    { label: ' 0-2', value: data[0]! + data[1]! + data[2]! },
-    { label: ' 3-5', value: data[3]! + data[4]! + data[5]! },
-    { label: ' 6-8', value: data[6]! + data[7]! + data[8]! },
-    { label: '9-11', value: data[9]! + data[10]! + data[11]! },
+    { label: ' 0-2 ', value: data[0]! + data[1]! + data[2]! },
+    { label: ' 3-5 ', value: data[3]! + data[4]! + data[5]! },
+    { label: ' 6-8 ', value: data[6]! + data[7]! + data[8]! },
+    { label: ' 9-11', value: data[9]! + data[10]! + data[11]! },
     { label: '12-14', value: data[12]! + data[13]! + data[14]! },
     { label: '15-17', value: data[15]! + data[16]! + data[17]! },
     { label: '18-20', value: data[18]! + data[19]! + data[20]! },
@@ -269,19 +304,28 @@ export function HourlyActivity({ data, width, color = 'cyan' }: HourlyActivityPr
   ];
 
   const bucketMax = Math.max(...buckets.map(b => b.value));
-  const barWidth = Math.max(20, Math.min(width - 12, 40)); // Label (6) + space + count
+  const total = buckets.reduce((sum, b) => sum + b.value, 0);
+  const maxIdx = buckets.findIndex(b => b.value === bucketMax);
+  const barWidth = Math.max(20, Math.min(width - 20, 40));
 
   return (
     <Box flexDirection="column">
       {buckets.map((bucket, idx) => {
         const filledWidth = bucketMax > 0 ? Math.round((bucket.value / bucketMax) * barWidth) : 0;
         const bar = '█'.repeat(Math.max(0, filledWidth));
+        const pct = total > 0 ? Math.round((bucket.value / total) * 100) : 0;
+        const isMax = idx === maxIdx && bucket.value > 0;
 
         return (
           <Box key={idx}>
             <Text color="gray">{bucket.label} </Text>
             <Text color={color}>{bar}</Text>
-            {bucket.value > 0 && <Text color="gray"> {bucket.value}</Text>}
+            {bucket.value > 0 && (
+              <Text color="gray">
+                {' '}{String(bucket.value).padStart(3)} ({String(pct).padStart(2)}%)
+              </Text>
+            )}
+            {isMax && <Text color="yellow"> ←</Text>}
           </Box>
         );
       })}
@@ -309,9 +353,8 @@ export function WeeklyActivity({ data, width, color = 'cyan' }: WeeklyActivityPr
     return <Text color="gray">No activity data</Text>;
   }
 
-  // Find the most active day
   const maxIdx = data.indexOf(max);
-  const barWidth = Math.max(15, Math.min(width - 20, 30)); // Label + count + percentage
+  const barWidth = Math.max(15, Math.min(width - 20, 30));
 
   return (
     <Box flexDirection="column">
@@ -328,7 +371,7 @@ export function WeeklyActivity({ data, width, color = 'cyan' }: WeeklyActivityPr
             <Text color={color}>{bar}</Text>
             {value > 0 && (
               <Text color="gray">
-                {' '}{String(value).padStart(3)} ({pct}%)
+                {' '}{String(value).padStart(3)} ({String(pct).padStart(2)}%)
               </Text>
             )}
             {isMax && <Text color="yellow"> ←</Text>}
