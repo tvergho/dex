@@ -136,6 +136,20 @@ export function formatTokenPair(
 }
 
 /**
+ * Format line counts as "+N / -M" for display
+ * Only shows if there are actual changes
+ */
+export function formatLineCounts(
+  linesAdded: number | undefined,
+  linesRemoved: number | undefined
+): string {
+  const added = linesAdded || 0;
+  const removed = linesRemoved || 0;
+  if (added === 0 && removed === 0) return '';
+  return `+${added} / -${removed}`;
+}
+
+/**
  * Truncate a list of file names for display
  */
 export function formatFileList(
@@ -186,6 +200,10 @@ export interface CombinedMessage {
   cacheCreationTokens?: number;
   /** Total cache read tokens for this message group */
   cacheReadTokens?: number;
+  /** Total lines added for this message group */
+  totalLinesAdded?: number;
+  /** Total lines removed for this message group */
+  totalLinesRemoved?: number;
 }
 
 /**
@@ -212,6 +230,8 @@ export function combineConsecutiveMessages<T extends {
   outputTokens?: number;
   cacheCreationTokens?: number;
   cacheReadTokens?: number;
+  totalLinesAdded?: number;
+  totalLinesRemoved?: number;
 }>(messages: T[]): CombinedMessagesResult {
   if (messages.length === 0) {
     return { messages: [], indexMap: new Map() };
@@ -224,18 +244,20 @@ export function combineConsecutiveMessages<T extends {
   let currentRole: string | null = null;
 
   for (const msg of messages) {
-    if (msg.role === currentRole && currentRole === 'assistant') {
-      // Continue grouping consecutive assistant messages
+    if (msg.role === currentRole && (currentRole === 'assistant' || currentRole === 'user')) {
+      // Continue grouping consecutive messages from the same role
       currentGroup.push(msg);
     } else {
       // Flush current group if any
       if (currentGroup.length > 0) {
         const combinedIdx = combined.length;
-        // Sum up tokens from all messages in the group
+        // Sum up tokens and line counts from all messages in the group
         const totalInputTokens = currentGroup.reduce((sum, m) => sum + (m.inputTokens || 0), 0);
         const totalOutputTokens = currentGroup.reduce((sum, m) => sum + (m.outputTokens || 0), 0);
         const totalCacheCreationTokens = currentGroup.reduce((sum, m) => sum + (m.cacheCreationTokens || 0), 0);
         const totalCacheReadTokens = currentGroup.reduce((sum, m) => sum + (m.cacheReadTokens || 0), 0);
+        const totalLinesAdded = currentGroup.reduce((sum, m) => sum + (m.totalLinesAdded || 0), 0);
+        const totalLinesRemoved = currentGroup.reduce((sum, m) => sum + (m.totalLinesRemoved || 0), 0);
         combined.push({
           messageIds: currentGroup.map(m => m.id),
           content: currentGroup.map(m => m.content).join('\n\n'),
@@ -247,6 +269,8 @@ export function combineConsecutiveMessages<T extends {
           outputTokens: totalOutputTokens > 0 ? totalOutputTokens : undefined,
           cacheCreationTokens: totalCacheCreationTokens > 0 ? totalCacheCreationTokens : undefined,
           cacheReadTokens: totalCacheReadTokens > 0 ? totalCacheReadTokens : undefined,
+          totalLinesAdded: totalLinesAdded > 0 ? totalLinesAdded : undefined,
+          totalLinesRemoved: totalLinesRemoved > 0 ? totalLinesRemoved : undefined,
         });
         // Map all original indices to this combined index
         for (const m of currentGroup) {
@@ -262,11 +286,13 @@ export function combineConsecutiveMessages<T extends {
   // Flush final group
   if (currentGroup.length > 0) {
     const combinedIdx = combined.length;
-    // Sum up tokens from all messages in the group
+    // Sum up tokens and line counts from all messages in the group
     const totalInputTokens = currentGroup.reduce((sum, m) => sum + (m.inputTokens || 0), 0);
     const totalOutputTokens = currentGroup.reduce((sum, m) => sum + (m.outputTokens || 0), 0);
     const totalCacheCreationTokens = currentGroup.reduce((sum, m) => sum + (m.cacheCreationTokens || 0), 0);
     const totalCacheReadTokens = currentGroup.reduce((sum, m) => sum + (m.cacheReadTokens || 0), 0);
+    const totalLinesAdded = currentGroup.reduce((sum, m) => sum + (m.totalLinesAdded || 0), 0);
+    const totalLinesRemoved = currentGroup.reduce((sum, m) => sum + (m.totalLinesRemoved || 0), 0);
     combined.push({
       messageIds: currentGroup.map(m => m.id),
       content: currentGroup.map(m => m.content).join('\n\n'),
@@ -278,6 +304,8 @@ export function combineConsecutiveMessages<T extends {
       outputTokens: totalOutputTokens > 0 ? totalOutputTokens : undefined,
       cacheCreationTokens: totalCacheCreationTokens > 0 ? totalCacheCreationTokens : undefined,
       cacheReadTokens: totalCacheReadTokens > 0 ? totalCacheReadTokens : undefined,
+      totalLinesAdded: totalLinesAdded > 0 ? totalLinesAdded : undefined,
+      totalLinesRemoved: totalLinesRemoved > 0 ? totalLinesRemoved : undefined,
     });
     for (const m of currentGroup) {
       indexMap.set(m.messageIndex, combinedIdx);

@@ -374,6 +374,7 @@ function SearchApp({
           <MessageDetailView
             message={combinedMessages[selectedMessageIndex]!}
             messageFiles={conversationMessageFiles}
+            width={width - 2}
             height={availableHeight}
             scrollOffset={messageScrollOffset}
             query={query}

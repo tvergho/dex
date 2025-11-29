@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Box, Text } from 'ink';
-import { HighlightedText } from './HighlightedText';
+import { marked, type MarkedExtension } from 'marked';
+import { markedTerminal } from 'marked-terminal';
 import {
   formatPaginationInfo,
   getFileName,
@@ -13,6 +14,7 @@ import type { MessageFile } from '../../schema/index';
 export interface MessageDetailViewProps {
   message: CombinedMessage;
   messageFiles: MessageFile[];
+  width: number;
   height: number;
   scrollOffset: number;
   query: string;
@@ -20,13 +22,14 @@ export interface MessageDetailViewProps {
 
 /**
  * Full message detail view for viewing untruncated message content
+ * Renders markdown with syntax highlighting and formatting
  */
 export function MessageDetailView({
   message,
   messageFiles,
+  width,
   height,
   scrollOffset,
-  query,
 }: MessageDetailViewProps) {
   const roleLabel = getRoleLabel(message.role);
   const roleColor = getRoleColor(message.role);
@@ -36,8 +39,25 @@ export function MessageDetailView({
     .filter((f) => message.messageIds.includes(f.messageId))
     .map((f) => getFileName(f.filePath));
 
-  // Split content into lines for scrolling
-  const lines = message.content.split('\n');
+  // Render markdown to terminal-formatted string
+  const renderedContent = useMemo(() => {
+    // Configure marked-terminal for each render to use current width
+    marked.use(markedTerminal({
+      reflowText: true,
+      width: Math.max(40, width - 4), // Leave some margin
+      tab: 2,
+    }) as MarkedExtension);
+
+    try {
+      return marked.parse(message.content) as string;
+    } catch {
+      // Fallback to raw content if markdown parsing fails
+      return message.content;
+    }
+  }, [message.content, width]);
+
+  // Split rendered content into lines for scrolling
+  const lines = renderedContent.split('\n');
   const headerHeight = 3;
   const footerHeight = 2;
   const availableHeight = height - headerHeight - footerHeight;
@@ -61,10 +81,7 @@ export function MessageDetailView({
       </Box>
 
       <Box flexDirection="column" flexGrow={1}>
-        <HighlightedText
-          text={visibleLines.join('\n')}
-          query={query}
-        />
+        <Text>{visibleLines.join('\n')}</Text>
       </Box>
     </Box>
   );
