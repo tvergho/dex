@@ -262,11 +262,14 @@ export function ActivityHeatmap({
                 dimColor={info.dimColor}
                 bold={info.bold}
               >
-                {info.char}
+                {info.char}{' '}
               </Text>
             );
           })}
-          <Text color="gray"> More  {activeDays} active days</Text>
+          <Text color="gray">More</Text>
+          <Text color="gray">  ·  </Text>
+          <Text color="green" bold>{activeDays}</Text>
+          <Text color="gray"> active days</Text>
         </Box>
       )}
     </Box>
