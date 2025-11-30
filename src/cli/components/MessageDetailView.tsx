@@ -58,9 +58,9 @@ export function MessageDetailView({
 
   // Split rendered content into lines for scrolling
   const lines = renderedContent.split('\n');
-  const headerHeight = 3;
-  const footerHeight = 2;
-  const availableHeight = height - headerHeight - footerHeight;
+  const headerHeight = 3; // Role label + line count + separator
+  // Note: No footerHeight reservation - the parent component handles the footer
+  const availableHeight = height - headerHeight;
   const visibleLines = lines.slice(scrollOffset, scrollOffset + availableHeight);
 
   const paginationInfo = formatPaginationInfo(scrollOffset, availableHeight, lines.length);

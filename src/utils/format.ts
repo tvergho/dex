@@ -3,6 +3,8 @@
  */
 
 import { getSourceInfo } from '../schema/index';
+import { marked, type MarkedExtension } from 'marked';
+import { markedTerminal } from 'marked-terminal';
 
 /**
  * Format a date as a human-readable relative time string
@@ -359,4 +361,31 @@ export function combineConsecutiveMessages<T extends {
   }
 
   return { messages: combined, indexMap };
+}
+
+/**
+ * Render markdown content to terminal-formatted string.
+ * Returns the rendered string which can be split by '\n' to get line count.
+ * This must match the rendering in MessageDetailView.
+ */
+export function renderMarkdownContent(content: string, width: number): string {
+  marked.use(markedTerminal({
+    reflowText: true,
+    width: Math.max(40, width - 4),
+    tab: 2,
+  }) as MarkedExtension);
+
+  try {
+    return marked.parse(content) as string;
+  } catch {
+    return content;
+  }
+}
+
+/**
+ * Get the line count for rendered markdown content.
+ * Used for scroll calculations in message detail view.
+ */
+export function getRenderedLineCount(content: string, width: number): number {
+  return renderMarkdownContent(content, width).split('\n').length;
 }

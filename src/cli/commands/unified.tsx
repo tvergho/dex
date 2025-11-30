@@ -555,6 +555,11 @@ function UnifiedApp() {
     // j/k navigate between messages, arrow keys scroll within message
     if (viewMode === 'message' && combinedMessages.length > 0) {
       const currentMessage = combinedMessages[selectedMessageIndex];
+      // Export trigger
+      if (input === 'e') {
+        openExportMenu();
+        return;
+      }
       if (key.escape || key.backspace || key.delete) {
         setViewMode('conversation');
         setMessageScrollOffset(0);
@@ -593,6 +598,11 @@ function UnifiedApp() {
       const messagesPerPage = Math.max(1, Math.floor((availableHeight - headerH) / 3));
       const maxScrollOffset = Math.max(0, combinedMessages.length - messagesPerPage);
 
+      // Export trigger
+      if (input === 'e') {
+        openExportMenu();
+        return;
+      }
       if (key.escape || key.backspace || key.delete) {
         if (searchResults && expandedResult.matches.length > 0) {
           setViewMode('matches');
@@ -631,6 +641,11 @@ function UnifiedApp() {
 
     // Matches view navigation
     if (viewMode === 'matches' && expandedResult) {
+      // Export trigger
+      if (input === 'e') {
+        openExportMenu();
+        return;
+      }
       if (key.escape || key.backspace || key.delete) {
         setViewMode('search');
         setExpandedIndex(null);
@@ -868,6 +883,8 @@ function UnifiedApp() {
               </>
             ) : viewMode === 'conversation' ? (
               <>
+                <Text color="white" bold>e</Text>
+                <Text color="gray"> export · </Text>
                 <Text color="white" bold>j</Text>
                 <Text color="gray">/</Text>
                 <Text color="white" bold>k</Text>
@@ -879,6 +896,8 @@ function UnifiedApp() {
               </>
             ) : viewMode === 'message' ? (
               <>
+                <Text color="white" bold>e</Text>
+                <Text color="gray"> export · </Text>
                 <Text color="white" bold>j</Text>
                 <Text color="gray">/</Text>
                 <Text color="white" bold>k</Text>
@@ -892,6 +911,8 @@ function UnifiedApp() {
               </>
             ) : viewMode === 'matches' ? (
               <>
+                <Text color="white" bold>e</Text>
+                <Text color="gray"> export · </Text>
                 <Text color="white" bold>j</Text>
                 <Text color="gray">/</Text>
                 <Text color="white" bold>k</Text>
