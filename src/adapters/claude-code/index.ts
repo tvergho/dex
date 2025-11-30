@@ -108,6 +108,8 @@ export class ClaudeCodeAdapter implements SourceAdapter {
       peakCacheCreationTokens: number;
       peakCacheReadTokens: number;
       peakContext: number;
+      // Track file edits from this message and propagated tool-only messages
+      fileEdits: typeof raw.messages[0]['fileEdits'];
     }
     const aggregatedStats = new Map<string, AggregatedStats>();
 
@@ -122,6 +124,7 @@ export class ClaudeCodeAdapter implements SourceAdapter {
         peakCacheCreationTokens: msg.cacheCreationTokens ?? 0,
         peakCacheReadTokens: msg.cacheReadTokens ?? 0,
         peakContext: ctx,
+        fileEdits: [...msg.fileEdits], // Copy file edits from this message
       });
     }
 
@@ -153,6 +156,11 @@ export class ClaudeCodeAdapter implements SourceAdapter {
                 stats.peakCacheCreationTokens = msg.cacheCreationTokens ?? 0;
                 stats.peakCacheReadTokens = msg.cacheReadTokens ?? 0;
                 stats.peakContext = ctx;
+              }
+
+              // Propagate file edits from tool-only messages
+              if (msg.fileEdits.length > 0) {
+                stats.fileEdits.push(...msg.fileEdits);
               }
             }
             break;
@@ -227,15 +235,17 @@ export class ClaudeCodeAdapter implements SourceAdapter {
       }
     }
 
-    // Build file edits
+    // Build file edits (using aggregated stats which include edits from tool-only messages)
     const fileEdits: FileEdit[] = [];
     for (let i = 0; i < mainMessages.length; i++) {
       const msg = mainMessages[i];
       if (!msg) continue;
       const messageId = `${conversationId}:${msg.uuid}`;
+      const stats = aggregatedStats.get(msg.uuid);
+      const msgFileEdits = stats?.fileEdits ?? msg.fileEdits;
 
-      for (let j = 0; j < msg.fileEdits.length; j++) {
-        const edit = msg.fileEdits[j];
+      for (let j = 0; j < msgFileEdits.length; j++) {
+        const edit = msgFileEdits[j];
         if (!edit) continue;
 
         // Create deterministic ID from edit properties

@@ -20,6 +20,14 @@ interface CodexFunctionCall {
   call_id: string;
 }
 
+interface CodexCustomToolCall {
+  type: 'custom_tool_call';
+  name: string;
+  input: string;
+  call_id: string;
+  status?: string;
+}
+
 interface CodexFunctionCallOutput {
   type: 'function_call_output';
   call_id: string;
@@ -63,6 +71,7 @@ type CodexPayload =
   | CodexSessionMeta
   | CodexMessage
   | CodexFunctionCall
+  | CodexCustomToolCall
   | CodexFunctionCallOutput
   | CodexTokenCount
   | { type: string }; // Catch-all for other types
@@ -416,15 +425,19 @@ export function extractConversation(sessionId: string, filePath: string): RawCon
           currentFiles = [];
           currentEdits = [];
         }
-      } else if (payload.type === 'function_call') {
-        const fc = payload as CodexFunctionCall;
+      } else if (payload.type === 'function_call' || payload.type === 'custom_tool_call') {
+        // Handle both function_call (older) and custom_tool_call (newer) formats
+        const isCustom = payload.type === 'custom_tool_call';
+        const fc = payload as CodexFunctionCall | CodexCustomToolCall;
         const output = toolOutputs.get(fc.call_id);
-        const filePath = extractFilePath(fc.name, fc.arguments);
+        // custom_tool_call uses 'input', function_call uses 'arguments'
+        const inputStr = isCustom ? (fc as CodexCustomToolCall).input : (fc as CodexFunctionCall).arguments;
+        const filePath = extractFilePath(fc.name, inputStr);
 
         const toolCall: RawToolCall = {
           id: fc.call_id,
           name: fc.name,
-          input: fc.arguments,
+          input: inputStr,
           output,
           filePath,
         };

@@ -458,12 +458,27 @@ export function extractConversations(dbPath: string): RawConversation[] {
         bubbleIdToIndex.set(bubbles[i]!.bubbleId, i);
       }
 
+      // Find the last assistant bubble index for orphaned edits
+      let lastAssistantIndex = -1;
+      for (let i = bubbles.length - 1; i >= 0; i--) {
+        if (bubbles[i]!.type === 'assistant') {
+          lastAssistantIndex = i;
+          break;
+        }
+      }
+
       for (const edit of allFileEdits) {
         if (edit.bubbleId) {
           const bubbleIndex = bubbleIdToIndex.get(edit.bubbleId);
           if (bubbleIndex !== undefined) {
             bubbles[bubbleIndex]!.fileEdits.push(edit);
+          } else if (lastAssistantIndex >= 0) {
+            // bubbleId exists but not found in our bubbles - associate with last assistant
+            bubbles[lastAssistantIndex]!.fileEdits.push(edit);
           }
+        } else if (lastAssistantIndex >= 0) {
+          // No bubbleId - associate with last assistant bubble
+          bubbles[lastAssistantIndex]!.fileEdits.push(edit);
         }
       }
 
