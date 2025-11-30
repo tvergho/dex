@@ -836,6 +836,175 @@ export const fileEditsRepo = {
   },
 };
 
+// ============ File Search ============
+
+export interface FileSearchMatch {
+  conversationId: string;
+  filePath: string;
+  role: 'edited' | 'context' | 'mentioned';
+  score: number;
+}
+
+function scoreFileRole(role: string): number {
+  const scores: Record<string, number> = { edited: 1.0, context: 0.5, mentioned: 0.3 };
+  return scores[role] ?? 0.3;
+}
+
+/**
+ * Search for conversations by file path pattern (case-insensitive substring match).
+ * Returns matches from all file tables, deduplicated and ranked by role.
+ */
+export async function searchByFilePath(
+  pattern: string,
+  limit = 50
+): Promise<FileSearchMatch[]> {
+  const lowerPattern = pattern.toLowerCase();
+
+  // Query all three file tables
+  const [fileEditsTable, conversationFilesTable, messageFilesTable] = await Promise.all([
+    getFileEditsTable(),
+    getFilesTable(),
+    getMessageFilesTable(),
+  ]);
+
+  const [fileEdits, conversationFiles, messageFiles] = await Promise.all([
+    fileEditsTable.query().toArray(),
+    conversationFilesTable.query().toArray(),
+    messageFilesTable.query().toArray(),
+  ]);
+
+  // Collect matches with scores, using Map for deduplication
+  // Key: conversationId:filePath, prioritize highest score
+  const matchMap = new Map<string, FileSearchMatch>();
+
+  const addMatch = (conversationId: string, filePath: string, role: 'edited' | 'context' | 'mentioned') => {
+    const key = `${conversationId}:${filePath}`;
+    const score = scoreFileRole(role);
+    const existing = matchMap.get(key);
+    if (!existing || score > existing.score) {
+      matchMap.set(key, { conversationId, filePath, role, score });
+    }
+  };
+
+  // File edits (role = 'edited')
+  for (const row of fileEdits) {
+    const filePath = row.filePath as string;
+    if (filePath.toLowerCase().includes(lowerPattern)) {
+      addMatch(row.conversationId as string, filePath, 'edited');
+    }
+  }
+
+  // Conversation files (use stored role)
+  for (const row of conversationFiles) {
+    const filePath = row.filePath as string;
+    if (filePath.toLowerCase().includes(lowerPattern)) {
+      const role = row.role as 'edited' | 'context' | 'mentioned';
+      addMatch(row.conversationId as string, filePath, role);
+    }
+  }
+
+  // Message files (use stored role)
+  for (const row of messageFiles) {
+    const filePath = row.filePath as string;
+    if (filePath.toLowerCase().includes(lowerPattern)) {
+      const role = row.role as 'edited' | 'context' | 'mentioned';
+      addMatch(row.conversationId as string, filePath, role);
+    }
+  }
+
+  // Sort by score descending, take top N
+  const results = Array.from(matchMap.values())
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  return results;
+}
+
+/**
+ * Get file matches for a set of conversation IDs.
+ * Used to enrich search results with file match info.
+ */
+export async function getFileMatchesForConversations(
+  conversationIds: Set<string>,
+  pattern: string
+): Promise<Map<string, FileSearchMatch[]>> {
+  const lowerPattern = pattern.toLowerCase();
+  const result = new Map<string, FileSearchMatch[]>();
+
+  // Initialize empty arrays for all requested conversations
+  for (const id of conversationIds) {
+    result.set(id, []);
+  }
+
+  // Query all three file tables
+  const [fileEditsTable, conversationFilesTable, messageFilesTable] = await Promise.all([
+    getFileEditsTable(),
+    getFilesTable(),
+    getMessageFilesTable(),
+  ]);
+
+  const [fileEdits, conversationFiles, messageFiles] = await Promise.all([
+    fileEditsTable.query().toArray(),
+    conversationFilesTable.query().toArray(),
+    messageFilesTable.query().toArray(),
+  ]);
+
+  // Per-conversation deduplication
+  const matchMaps = new Map<string, Map<string, FileSearchMatch>>();
+  for (const id of conversationIds) {
+    matchMaps.set(id, new Map());
+  }
+
+  const addMatch = (conversationId: string, filePath: string, role: 'edited' | 'context' | 'mentioned') => {
+    const convMap = matchMaps.get(conversationId);
+    if (!convMap) return;
+
+    const score = scoreFileRole(role);
+    const existing = convMap.get(filePath);
+    if (!existing || score > existing.score) {
+      convMap.set(filePath, { conversationId, filePath, role, score });
+    }
+  };
+
+  // File edits (role = 'edited')
+  for (const row of fileEdits) {
+    const conversationId = row.conversationId as string;
+    if (!conversationIds.has(conversationId)) continue;
+    const filePath = row.filePath as string;
+    if (filePath.toLowerCase().includes(lowerPattern)) {
+      addMatch(conversationId, filePath, 'edited');
+    }
+  }
+
+  // Conversation files
+  for (const row of conversationFiles) {
+    const conversationId = row.conversationId as string;
+    if (!conversationIds.has(conversationId)) continue;
+    const filePath = row.filePath as string;
+    if (filePath.toLowerCase().includes(lowerPattern)) {
+      addMatch(conversationId, filePath, row.role as 'edited' | 'context' | 'mentioned');
+    }
+  }
+
+  // Message files
+  for (const row of messageFiles) {
+    const conversationId = row.conversationId as string;
+    if (!conversationIds.has(conversationId)) continue;
+    const filePath = row.filePath as string;
+    if (filePath.toLowerCase().includes(lowerPattern)) {
+      addMatch(conversationId, filePath, row.role as 'edited' | 'context' | 'mentioned');
+    }
+  }
+
+  // Convert maps to sorted arrays
+  for (const [convId, convMap] of matchMaps) {
+    const matches = Array.from(convMap.values()).sort((a, b) => b.score - a.score);
+    result.set(convId, matches);
+  }
+
+  return result;
+}
+
 // ============ Search Service ============
 
 export async function search(query: string, limit = 50): Promise<SearchResponse> {

@@ -22,9 +22,10 @@ program
   .action(syncCommand);
 
 program
-  .command('search <query...>')
+  .command('search [query...]')
   .description('Full-text search across conversations')
   .option('-l, --limit <number>', 'Maximum number of results', '20')
+  .option('-f, --file <pattern>', 'Filter by file path (e.g., auth.ts, src/components)')
   .action((queryParts: string[], options) => searchCommand(queryParts.join(' '), options));
 
 program

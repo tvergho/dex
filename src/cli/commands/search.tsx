@@ -14,7 +14,16 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index';
-import { search, messageRepo, filesRepo, messageFilesRepo } from '../../db/repository';
+import {
+  search,
+  messageRepo,
+  filesRepo,
+  messageFilesRepo,
+  searchByFilePath,
+  getFileMatchesForConversations,
+  conversationRepo,
+  type FileSearchMatch,
+} from '../../db/repository';
 import {
   ResultRow,
   MatchesView,
@@ -33,6 +42,7 @@ import type { SearchResponse, ConversationFile, MessageFile } from '../../schema
 
 interface SearchOptions {
   limit?: string;
+  file?: string;
 }
 
 type ViewMode = 'list' | 'matches' | 'conversation' | 'message';
@@ -40,9 +50,11 @@ type ViewMode = 'list' | 'matches' | 'conversation' | 'message';
 function SearchApp({
   query,
   limit,
+  filePattern,
 }: {
   query: string;
   limit: number;
+  filePattern?: string;
 }) {
   const { exit } = useApp();
   const { width, height } = useScreenSize();
@@ -51,6 +63,7 @@ function SearchApp({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [response, setResponse] = useState<SearchResponse | null>(null);
+  const [fileMatches, setFileMatches] = useState<Map<string, FileSearchMatch[]>>(new Map());
 
   // Navigation state
   const [viewMode, setViewMode] = useState<ViewMode>('list');
@@ -75,8 +88,99 @@ function SearchApp({
     async function runSearch() {
       try {
         await connect();
-        const result = await search(query, limit);
-        setResponse(result);
+        const startTime = Date.now();
+
+        if (filePattern && !query) {
+          // File-only search: find conversations by file path
+          const fileResults = await searchByFilePath(filePattern, limit);
+
+          // Group by conversation and get unique conversation IDs
+          const convIdToMatches = new Map<string, FileSearchMatch[]>();
+          for (const match of fileResults) {
+            const existing = convIdToMatches.get(match.conversationId) ?? [];
+            existing.push(match);
+            convIdToMatches.set(match.conversationId, existing);
+          }
+
+          // Fetch conversation metadata
+          const conversations = await Promise.all(
+            Array.from(convIdToMatches.keys()).map((id) => conversationRepo.findById(id))
+          );
+
+          // Build search response with file-based results
+          const results = conversations
+            .filter((conv): conv is NonNullable<typeof conv> => conv !== null)
+            .map((conv) => {
+              const matches = convIdToMatches.get(conv.id) ?? [];
+              // Calculate score from file matches (sum of file scores)
+              const fileScore = matches.reduce((sum, m) => sum + m.score, 0);
+              return {
+                conversation: conv,
+                matches: [], // No message matches for file-only search
+                bestMatch: {
+                  messageId: '',
+                  conversationId: conv.id,
+                  role: 'user' as const,
+                  content: '',
+                  snippet: `${matches.length} file(s) matching "${filePattern}"`,
+                  highlightRanges: [] as [number, number][],
+                  score: fileScore,
+                  messageIndex: 0,
+                },
+                totalMatches: matches.length,
+              };
+            })
+            .sort((a, b) => b.bestMatch.score - a.bestMatch.score);
+
+          setResponse({
+            query: filePattern,
+            results,
+            totalConversations: results.length,
+            totalMessages: 0,
+            searchTimeMs: Date.now() - startTime,
+          });
+          setFileMatches(convIdToMatches);
+        } else if (filePattern && query) {
+          // Combined search: search messages, then filter/enrich by file matches
+          const result = await search(query, limit * 2); // Get more to filter
+
+          // Get file matches for the result conversations
+          const convIds = new Set(result.results.map((r) => r.conversation.id));
+          const fileMatchMap = await getFileMatchesForConversations(convIds, filePattern);
+
+          // Filter to only conversations with file matches, boost scores
+          const filteredResults = result.results
+            .filter((r) => {
+              const matches = fileMatchMap.get(r.conversation.id) ?? [];
+              return matches.length > 0;
+            })
+            .map((r) => {
+              const matches = fileMatchMap.get(r.conversation.id) ?? [];
+              const fileBoost = matches.reduce((sum, m) => sum + m.score * 0.5, 0);
+              return {
+                ...r,
+                bestMatch: {
+                  ...r.bestMatch,
+                  score: r.bestMatch.score + fileBoost,
+                },
+              };
+            })
+            .sort((a, b) => b.bestMatch.score - a.bestMatch.score)
+            .slice(0, limit);
+
+          setResponse({
+            ...result,
+            results: filteredResults,
+            totalConversations: filteredResults.length,
+            searchTimeMs: Date.now() - startTime,
+          });
+          setFileMatches(fileMatchMap);
+        } else {
+          // Standard message search
+          const result = await search(query, limit);
+          setResponse(result);
+          setFileMatches(new Map());
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -84,7 +188,7 @@ function SearchApp({
       }
     }
     runSearch();
-  }, [query, limit]);
+  }, [query, limit, filePattern]);
 
   // Load files and compute combined messages when expanding a conversation
   useEffect(() => {
@@ -315,9 +419,14 @@ function SearchApp({
   });
 
   if (loading) {
+    const searchLabel = filePattern && !query
+      ? `files matching "${filePattern}"`
+      : filePattern
+        ? `"${query}" in files matching "${filePattern}"`
+        : `"${query}"`;
     return (
       <Box width={width} height={height} alignItems="center" justifyContent="center">
-        <Text color="cyan">Searching for "{query}"...</Text>
+        <Text color="cyan">Searching for {searchLabel}...</Text>
       </Box>
     );
   }
@@ -389,10 +498,23 @@ function SearchApp({
       <Box flexDirection="column" marginBottom={1}>
         <Box paddingX={1}>
           <Text bold color="white">Search </Text>
-          <Text color="cyan" bold>"{response.query}"</Text>
+          {filePattern && !query ? (
+            <>
+              <Text color="yellow" bold>--file "{filePattern}"</Text>
+            </>
+          ) : filePattern ? (
+            <>
+              <Text color="cyan" bold>"{query}"</Text>
+              <Text color="gray"> </Text>
+              <Text color="yellow" bold>--file "{filePattern}"</Text>
+            </>
+          ) : (
+            <Text color="cyan" bold>"{response.query}"</Text>
+          )}
           <Text dimColor>
             {' '}— {formatConversationCount(response.totalConversations)}
-            , {formatMessageCount(response.totalMessages)} ({response.searchTimeMs}ms)
+            {response.totalMessages > 0 && `, ${formatMessageCount(response.totalMessages)}`}
+            {' '}({response.searchTimeMs}ms)
           </Text>
         </Box>
         <Box paddingX={1}>
@@ -441,6 +563,7 @@ function SearchApp({
         ) : (
           visibleResults.map((result, idx) => {
             const actualIndex = scrollOffset + idx;
+            const convFileMatches = fileMatches.get(result.conversation.id);
             return (
               <ResultRow
                 key={result.conversation.id}
@@ -448,6 +571,7 @@ function SearchApp({
                 isSelected={actualIndex === selectedIndex}
                 width={width - 2}
                 query={query}
+                fileMatches={convFileMatches}
               />
             );
           })
@@ -472,29 +596,93 @@ function SearchApp({
   );
 }
 
-async function plainSearch(query: string, limit: number): Promise<void> {
+async function plainSearch(query: string, limit: number, filePattern?: string): Promise<void> {
   await connect();
-  const result = await search(query, limit);
+  const startTime = Date.now();
 
-  console.log(`\nSearch: "${result.query}"`);
+  let results: { conversation: { id: string; title: string; source: string; workspacePath?: string; updatedAt?: string }; totalMatches: number; snippet: string }[] = [];
+  let totalConversations = 0;
+  let totalMessages = 0;
+
+  if (filePattern && !query) {
+    // File-only search
+    const fileResults = await searchByFilePath(filePattern, limit);
+    const convIdToMatches = new Map<string, FileSearchMatch[]>();
+    for (const match of fileResults) {
+      const existing = convIdToMatches.get(match.conversationId) ?? [];
+      existing.push(match);
+      convIdToMatches.set(match.conversationId, existing);
+    }
+
+    const conversations = await Promise.all(
+      Array.from(convIdToMatches.keys()).map((id) => conversationRepo.findById(id))
+    );
+
+    results = conversations
+      .filter((conv): conv is NonNullable<typeof conv> => conv !== null)
+      .map((conv) => {
+        const matches = convIdToMatches.get(conv.id) ?? [];
+        return {
+          conversation: conv,
+          totalMatches: matches.length,
+          snippet: matches.slice(0, 3).map((m) => m.filePath.split('/').pop()).join(', '),
+        };
+      });
+    totalConversations = results.length;
+  } else if (filePattern && query) {
+    // Combined search
+    const result = await search(query, limit * 2);
+    const convIds = new Set(result.results.map((r) => r.conversation.id));
+    const fileMatchMap = await getFileMatchesForConversations(convIds, filePattern);
+
+    results = result.results
+      .filter((r) => (fileMatchMap.get(r.conversation.id) ?? []).length > 0)
+      .slice(0, limit)
+      .map((r) => ({
+        conversation: r.conversation,
+        totalMatches: r.totalMatches,
+        snippet: r.bestMatch.snippet,
+      }));
+    totalConversations = results.length;
+    totalMessages = result.totalMessages;
+  } else {
+    // Standard search
+    const result = await search(query, limit);
+    results = result.results.map((r) => ({
+      conversation: r.conversation,
+      totalMatches: r.totalMatches,
+      snippet: r.bestMatch.snippet,
+    }));
+    totalConversations = result.totalConversations;
+    totalMessages = result.totalMessages;
+  }
+
+  const searchTimeMs = Date.now() - startTime;
+  const searchLabel = filePattern && !query
+    ? `--file "${filePattern}"`
+    : filePattern
+      ? `"${query}" --file "${filePattern}"`
+      : `"${query}"`;
+
+  console.log(`\nSearch: ${searchLabel}`);
   console.log(
-    `${formatConversationCount(result.totalConversations)}, ${formatMessageCount(result.totalMessages)} (${result.searchTimeMs}ms)\n`
+    `${formatConversationCount(totalConversations)}${totalMessages > 0 ? `, ${formatMessageCount(totalMessages)}` : ''} (${searchTimeMs}ms)\n`
   );
 
-  if (result.results.length === 0) {
+  if (results.length === 0) {
     console.log('No results found.');
     return;
   }
 
-  for (const r of result.results) {
+  for (const r of results) {
     console.log(`${r.conversation.title}`);
-    const sourceName = formatSourceName(r.conversation.source);
+    const sourceName = formatSourceName(r.conversation.source as 'cursor' | 'claude-code' | 'codex' | 'opencode');
     console.log(`   ${sourceName}`);
     if (r.conversation.workspacePath) {
       console.log(`   ${r.conversation.workspacePath}`);
     }
     console.log(`   ${r.totalMatches} match(es) · ${formatRelativeTime(r.conversation.updatedAt)}`);
-    console.log(`   "${r.bestMatch.snippet.replace(/\n/g, ' ').slice(0, 100)}${r.bestMatch.snippet.length > 100 ? '...' : ''}"`);
+    console.log(`   "${r.snippet.replace(/\n/g, ' ').slice(0, 100)}${r.snippet.length > 100 ? '...' : ''}"`);
     console.log(`   ID: ${r.conversation.id}`);
     console.log('');
   }
@@ -502,13 +690,20 @@ async function plainSearch(query: string, limit: number): Promise<void> {
 
 export async function searchCommand(query: string, options: SearchOptions): Promise<void> {
   const limit = parseInt(options.limit ?? '20', 10);
+  const filePattern = options.file;
+
+  // Require at least query or file pattern
+  if (!query && !filePattern) {
+    console.error('Error: Please provide a search query or --file pattern');
+    process.exit(1);
+  }
 
   if (!process.stdin.isTTY) {
-    await plainSearch(query, limit);
+    await plainSearch(query, limit, filePattern);
     return;
   }
 
-  const app = withFullScreen(<SearchApp query={query} limit={limit} />);
+  const app = withFullScreen(<SearchApp query={query} limit={limit} filePattern={filePattern} />);
   await app.start();
   await app.waitUntilExit();
 }
