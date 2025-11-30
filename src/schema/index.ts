@@ -1,19 +1,26 @@
 import { z } from 'zod';
 
-// Source types for extensibility
-export const SourceType = z.enum(['cursor', 'claude-code', 'codex', 'opencode']);
-export type SourceType = z.infer<typeof SourceType>;
-
-// Source type constants for type-safe usage
+// Source constants - single source of truth for valid source IDs
 export const Source = {
-  Cursor: 'cursor' as const,
-  ClaudeCode: 'claude-code' as const,
-  Codex: 'codex' as const,
-  OpenCode: 'opencode' as const,
+  Cursor: 'cursor',
+  ClaudeCode: 'claude-code',
+  Codex: 'codex',
+  OpenCode: 'opencode',
 } as const;
 
-// All valid source values
-export const ALL_SOURCES: readonly SourceType[] = SourceType.options;
+// Type for source values
+export type SourceType = (typeof Source)[keyof typeof Source];
+
+// All valid source values as array
+export const ALL_SOURCES: readonly SourceType[] = Object.values(Source);
+
+// Zod schema for validation (uses tuple type for z.enum)
+export const SourceTypeSchema = z.enum([
+  Source.Cursor,
+  Source.ClaudeCode,
+  Source.Codex,
+  Source.OpenCode,
+]);
 
 // Source display information
 export interface SourceInfo {
@@ -33,13 +40,14 @@ export const SOURCE_INFO: Record<SourceType, SourceInfo> = {
  * Get display info for a source
  */
 export function getSourceInfo(source: string): SourceInfo {
-  const normalized = source.toLowerCase() as SourceType;
-  if (normalized in SOURCE_INFO) {
-    return SOURCE_INFO[normalized];
+  const normalized = source.toLowerCase();
+  const info = SOURCE_INFO[normalized as SourceType];
+  if (info) {
+    return info;
   }
   // Fallback for unknown sources
   return {
-    id: normalized,
+    id: normalized as SourceType,
     name: source.charAt(0).toUpperCase() + source.slice(1),
     color: 'white',
   };
@@ -47,7 +55,7 @@ export function getSourceInfo(source: string): SourceInfo {
 
 // Reference back to original source for deep linking
 export const SourceRef = z.object({
-  source: SourceType,
+  source: SourceTypeSchema,
   workspacePath: z.string().optional(),
   originalId: z.string(),
   dbPath: z.string(),
@@ -88,7 +96,7 @@ export type ToolCall = z.infer<typeof ToolCall>;
 // Conversation (top-level entity)
 export const Conversation = z.object({
   id: z.string(),
-  source: SourceType,
+  source: SourceTypeSchema,
   title: z.string(),
   subtitle: z.string().optional(),
   workspacePath: z.string().optional(),
@@ -145,7 +153,7 @@ export type FileEdit = z.infer<typeof FileEdit>;
 
 // Sync state for incremental updates
 export const SyncState = z.object({
-  source: SourceType,
+  source: SourceTypeSchema,
   workspacePath: z.string(),
   dbPath: z.string(),
   lastSyncedAt: z.string().datetime(),

@@ -193,8 +193,8 @@ export async function runSync(
   };
 
   try {
-    // Kill any running embedding processes to prevent LanceDB commit conflicts
-    // They will be restarted after sync completes
+    // Kill any running embedding processes to prevent conflicts during sync
+    // The embedding will be restarted after sync if new data was added
     killEmbeddingProcesses();
 
     // Connect to database
@@ -260,25 +260,23 @@ export async function runSync(
       return;
     }
 
-    // ========== PHASE 2: Batch collect all data to insert ==========
+    // ========== PHASE 2: Filter to only NEW conversations (incremental sync) ==========
     progress.phase = 'syncing';
     progress.currentSource = 'all sources';
     onProgress({ ...progress });
 
-    // Collect all data into arrays for bulk operations
-    const allConvRows: Parameters<typeof conversationRepo.upsert>[0][] = [];
-    const allMessages: Parameters<typeof messageRepo.bulkInsert>[0] = [];
-    const allToolCalls: Parameters<typeof toolCallRepo.bulkInsert>[0] = [];
-    const allFiles: Parameters<typeof filesRepo.bulkInsert>[0] = [];
-    const allMessageFiles: Parameters<typeof messageFilesRepo.bulkInsert>[0] = [];
-    const allFileEdits: Parameters<typeof fileEditsRepo.bulkInsert>[0] = [];
+    // Get all candidate conversation IDs
+    const candidateIds = allConversations.map((c) => c.normalized.conversation.id);
 
-    // For force mode, track what to delete
-    const deleteBySource = new Map<string, Set<string>>(); // source -> workspacePaths
+    // In force mode, we re-sync everything; otherwise only sync new conversations
+    let conversationsToSync = allConversations;
+    let existingIds = new Set<string>();
 
-    for (const { normalized, adapter, location } of allConversations) {
-      // Track deletions for force mode
-      if (options.force) {
+    if (options.force) {
+      // Force mode: delete all existing data and re-sync everything
+      // Track what to delete by source
+      const deleteBySource = new Map<string, Set<string>>();
+      for (const { adapter, location } of allConversations) {
         const key = adapter.name;
         if (!deleteBySource.has(key)) {
           deleteBySource.set(key, new Set());
@@ -286,102 +284,96 @@ export async function runSync(
         deleteBySource.get(key)!.add(location.workspacePath);
       }
 
-      // Collect conversation
-      allConvRows.push(normalized.conversation);
-
-      // Collect messages
-      if (normalized.messages.length > 0) {
-        allMessages.push(...normalized.messages);
-      }
-
-      // Collect tool calls
-      if (normalized.toolCalls.length > 0) {
-        allToolCalls.push(...normalized.toolCalls);
-      }
-
-      // Collect files
-      if (normalized.files && normalized.files.length > 0) {
-        allFiles.push(...normalized.files);
-      }
-
-      // Collect message files
-      if (normalized.messageFiles && normalized.messageFiles.length > 0) {
-        allMessageFiles.push(...normalized.messageFiles);
-      }
-
-      // Collect file edits
-      if (normalized.fileEdits && normalized.fileEdits.length > 0) {
-        allFileEdits.push(...normalized.fileEdits);
-      }
-    }
-
-    // ========== PHASE 3: Bulk delete (force mode) ==========
-    // In force mode, delete all existing data for the affected sources/workspaces
-    // Also collect conversation IDs to delete messages, etc. even in non-force mode
-    // This prevents duplicates when syncing the same conversations again
-    const conversationIdsToDelete = new Set<string>();
-
-    if (options.force) {
+      // Delete existing conversations by source
       for (const [source, workspacePaths] of deleteBySource) {
         for (const workspacePath of workspacePaths) {
           await conversationRepo.deleteBySource(source, workspacePath);
         }
       }
-      // In force mode, we delete by source - add all conversation IDs we're about to insert
-      for (const { normalized } of allConversations) {
-        conversationIdsToDelete.add(normalized.conversation.id);
+
+      // Delete related data for all conversations we're about to insert
+      for (const id of candidateIds) {
+        await Promise.all([
+          messageRepo.deleteByConversation(id),
+          toolCallRepo.deleteByConversation(id),
+          filesRepo.deleteByConversation(id),
+          messageFilesRepo.deleteByConversation(id),
+          fileEditsRepo.deleteByConversation(id),
+        ]);
       }
     } else {
-      // In non-force mode, just collect IDs of conversations we're going to update
-      for (const { normalized } of allConversations) {
-        conversationIdsToDelete.add(normalized.conversation.id);
+      // Incremental mode: only insert NEW conversations (skip existing ones)
+      existingIds = await conversationRepo.getExistingIds(candidateIds);
+      conversationsToSync = allConversations.filter(
+        (c) => !existingIds.has(c.normalized.conversation.id)
+      );
+    }
+
+    // If nothing new to sync, we're done
+    if (conversationsToSync.length === 0) {
+      progress.phase = 'done';
+      progress.currentSource = undefined;
+      progress.conversationsIndexed = 0;
+      progress.messagesIndexed = 0;
+      onProgress({ ...progress });
+      return;
+    }
+
+    // ========== PHASE 3: Collect data from NEW conversations only ==========
+    const newConvRows: Parameters<typeof conversationRepo.upsert>[0][] = [];
+    const newMessages: Parameters<typeof messageRepo.bulkInsert>[0] = [];
+    const newToolCalls: Parameters<typeof toolCallRepo.bulkInsert>[0] = [];
+    const newFiles: Parameters<typeof filesRepo.bulkInsert>[0] = [];
+    const newMessageFiles: Parameters<typeof messageFilesRepo.bulkInsert>[0] = [];
+    const newFileEdits: Parameters<typeof fileEditsRepo.bulkInsert>[0] = [];
+
+    for (const { normalized } of conversationsToSync) {
+      newConvRows.push(normalized.conversation);
+
+      if (normalized.messages.length > 0) {
+        newMessages.push(...normalized.messages);
+      }
+      if (normalized.toolCalls.length > 0) {
+        newToolCalls.push(...normalized.toolCalls);
+      }
+      if (normalized.files && normalized.files.length > 0) {
+        newFiles.push(...normalized.files);
+      }
+      if (normalized.messageFiles && normalized.messageFiles.length > 0) {
+        newMessageFiles.push(...normalized.messageFiles);
+      }
+      if (normalized.fileEdits && normalized.fileEdits.length > 0) {
+        newFileEdits.push(...normalized.fileEdits);
       }
     }
 
-    // Delete existing messages/toolcalls/files for conversations we're about to update
-    // This prevents duplicate rows since LanceDB doesn't enforce unique constraints
-    for (const convId of conversationIdsToDelete) {
-      await Promise.all([
-        messageRepo.deleteByConversation(convId),
-        toolCallRepo.deleteByConversation(convId),
-        filesRepo.deleteByConversation(convId),
-        messageFilesRepo.deleteByConversation(convId),
-        fileEditsRepo.deleteByConversation(convId),
-      ]);
-    }
-
-    // ========== PHASE 4: Bulk insert all data ==========
-    // Bulk upsert all conversations at once
-    await conversationRepo.bulkUpsert(allConvRows);
-    progress.conversationsIndexed = allConvRows.length;
+    // ========== PHASE 4: Bulk insert new data ==========
+    // For incremental sync, we only add new data (no deletes needed)
+    await conversationRepo.bulkUpsert(newConvRows);
+    progress.conversationsIndexed = newConvRows.length;
     progress.projectsProcessed = projectPaths.size;
     onProgress({ ...progress });
 
-    // Bulk insert messages
-    if (allMessages.length > 0) {
-      await messageRepo.bulkInsert(allMessages);
-      progress.messagesIndexed = allMessages.length;
+    if (newMessages.length > 0) {
+      await messageRepo.bulkInsert(newMessages);
+      progress.messagesIndexed = newMessages.length;
       onProgress({ ...progress });
     }
 
-    // Bulk insert tool calls
-    if (allToolCalls.length > 0) {
-      await toolCallRepo.bulkInsert(allToolCalls);
+    if (newToolCalls.length > 0) {
+      await toolCallRepo.bulkInsert(newToolCalls);
     }
 
-    // Bulk insert files
-    if (allFiles.length > 0) {
-      await filesRepo.bulkInsert(allFiles);
+    if (newFiles.length > 0) {
+      await filesRepo.bulkInsert(newFiles);
     }
 
-    // Bulk insert message files
-    if (allMessageFiles.length > 0) {
-      await messageFilesRepo.bulkInsert(allMessageFiles);
+    if (newMessageFiles.length > 0) {
+      await messageFilesRepo.bulkInsert(newMessageFiles);
     }
 
-    // Bulk insert file edits
-    if (allFileEdits.length > 0) {
-      await fileEditsRepo.bulkInsert(allFileEdits);
+    if (newFileEdits.length > 0) {
+      await fileEditsRepo.bulkInsert(newFileEdits);
     }
 
     // ========== PHASE 5: Update sync state ==========

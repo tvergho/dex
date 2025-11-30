@@ -159,6 +159,21 @@ export const conversationRepo = {
     await table.add([row]);
   },
 
+  /**
+   * Get the set of conversation IDs that already exist in the database.
+   * Used for incremental sync to skip existing conversations.
+   */
+  async getExistingIds(candidateIds: string[]): Promise<Set<string>> {
+    if (candidateIds.length === 0) return new Set();
+
+    const table = await getConversationsTable();
+    const allExisting = await table.query().select(['id']).toArray();
+    const existingIds = new Set(allExisting.map((row) => row.id as string));
+
+    // Return only the IDs that exist from the candidate list
+    return new Set(candidateIds.filter((id) => existingIds.has(id)));
+  },
+
   async bulkUpsert(conversations: Conversation[]): Promise<void> {
     if (conversations.length === 0) return;
 
