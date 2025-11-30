@@ -30,13 +30,13 @@ import {
 import {
   setEmbeddingProgress,
   clearEmbeddingProgress,
-  isEmbeddingInProgress,
 } from '../../embeddings/index';
 import { printRichSummary } from './stats';
 
 /**
  * Kill any running embedding processes to prevent LanceDB commit conflicts.
  * The embedding worker will be restarted after sync completes.
+ * Also resets the progress state so the worker can be respawned.
  */
 function killEmbeddingProcesses(): void {
   try {
@@ -45,9 +45,18 @@ function killEmbeddingProcesses(): void {
     if (process.platform !== 'win32') {
       execSync('pkill -f "bun.*embed\\.ts" 2>/dev/null || true', { stdio: 'ignore' });
     }
+    // Also kill any llama-server processes that might be running
+    if (process.platform !== 'win32') {
+      execSync('pkill -f "llama-server" 2>/dev/null || true', { stdio: 'ignore' });
+    }
   } catch {
     // Ignore errors - process may not exist
   }
+
+  // Reset the progress file status since we just killed any running process.
+  // The embed worker determines what to embed by checking for zero vectors,
+  // so it will correctly resume from where it left off.
+  clearEmbeddingProgress();
 }
 
 export interface SyncProgress {
@@ -396,19 +405,18 @@ export async function runSync(
 
       await rebuildFtsIndex();
 
-      // Only spawn embed if not already in progress
-      if (!isEmbeddingInProgress()) {
-        clearEmbeddingProgress();
-        setEmbeddingProgress({
-          status: 'idle',
-          total: progress.messagesIndexed,
-          completed: 0,
-        });
+      // Spawn background embedding process.
+      // We killed any existing process at the start of sync, so we can safely spawn.
+      // The embed worker checks for messages with zero vectors, so it will correctly
+      // embed only what's needed (new messages + any that were interrupted).
+      setEmbeddingProgress({
+        status: 'idle',
+        total: progress.messagesIndexed,
+        completed: 0,
+      });
 
-        // Spawn background process for embedding generation
-        spawnBackgroundEmbedding();
-        progress.embeddingStarted = true;
-      }
+      spawnBackgroundEmbedding();
+      progress.embeddingStarted = true;
     }
 
     progress.phase = 'done';
