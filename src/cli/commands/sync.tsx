@@ -252,6 +252,10 @@ async function runSync(
 
     for (const [projectPath, conversations] of byProject) {
       progress.currentProject = projectPath;
+      // Update currentSource to the adapter of the first conversation in this project group
+      if (conversations.length > 0) {
+        progress.currentSource = conversations[0]!.adapter.name;
+      }
       onProgress({ ...progress });
 
       if (options.force) {
