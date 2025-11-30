@@ -56,7 +56,9 @@ tests/
 │   └── commands/
 │       ├── export.test.ts
 │       ├── backup.test.ts
-│       └── import.test.ts
+│       ├── import.test.ts
+│       ├── list.test.ts
+│       └── show.test.ts
 └── README.md           # This file
 ```
 

@@ -503,32 +503,37 @@ function UnifiedApp() {
     }
 
     // Message detail view navigation
+    // j/k navigate between messages, arrow keys scroll within message
     if (viewMode === 'message' && combinedMessages.length > 0) {
       const currentMessage = combinedMessages[selectedMessageIndex];
       if (key.escape || key.backspace || key.delete) {
         setViewMode('conversation');
         setMessageScrollOffset(0);
-      } else if (input === 'j' || key.downArrow) {
+      } else if (input === 'j') {
+        // j = next message
+        if (selectedMessageIndex < combinedMessages.length - 1) {
+          setSelectedMessageIndex((i) => i + 1);
+          setMessageScrollOffset(0);
+        }
+      } else if (input === 'k') {
+        // k = previous message
+        if (selectedMessageIndex > 0) {
+          setSelectedMessageIndex((i) => i - 1);
+          setMessageScrollOffset(0);
+        }
+      } else if (key.downArrow) {
+        // Down arrow = scroll within message
         const lines = currentMessage?.content.split('\n') || [];
         const maxOffset = Math.max(0, lines.length - (height - 5));
         setMessageScrollOffset((o) => Math.min(o + 1, maxOffset));
-      } else if (input === 'k' || key.upArrow) {
+      } else if (key.upArrow) {
+        // Up arrow = scroll within message
         setMessageScrollOffset((o) => Math.max(o - 1, 0));
       } else if (input === 'g') {
         setMessageScrollOffset(0);
       } else if (input === 'G') {
         const lines = currentMessage?.content.split('\n') || [];
         setMessageScrollOffset(Math.max(0, lines.length - (height - 5)));
-      } else if (input === 'n') {
-        if (selectedMessageIndex < combinedMessages.length - 1) {
-          setSelectedMessageIndex((i) => i + 1);
-          setMessageScrollOffset(0);
-        }
-      } else if (input === 'p') {
-        if (selectedMessageIndex > 0) {
-          setSelectedMessageIndex((i) => i - 1);
-          setMessageScrollOffset(0);
-        }
       }
       return;
     }
@@ -808,11 +813,11 @@ function UnifiedApp() {
                 <Text color="white" bold>j</Text>
                 <Text color="gray">/</Text>
                 <Text color="white" bold>k</Text>
-                <Text color="gray"> scroll · </Text>
-                <Text color="white" bold>n</Text>
+                <Text color="gray"> nav · </Text>
+                <Text color="white" bold>↑</Text>
                 <Text color="gray">/</Text>
-                <Text color="white" bold>p</Text>
-                <Text color="gray"> next/prev · </Text>
+                <Text color="white" bold>↓</Text>
+                <Text color="gray"> scroll · </Text>
                 <Text color="white" bold>Esc</Text>
                 <Text color="gray"> back</Text>
               </>
