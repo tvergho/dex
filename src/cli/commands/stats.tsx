@@ -867,9 +867,14 @@ function ProjectConversationsView({
 
 type ViewMode = 'dashboard' | 'conversation' | 'message' | 'project-conversations';
 
-function StatsApp({ period }: { period: number }) {
-  const { exit } = useApp();
-  const { width, height } = useScreenSize();
+export interface StatsContentProps {
+  width: number;
+  height: number;
+  period: number;
+  onBack: () => void;
+}
+
+export function StatsContent({ width, height, period, onBack }: StatsContentProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
@@ -1103,9 +1108,9 @@ function StatsApp({ period }: { period: number }) {
   }
 
   useInput((input, key) => {
-    // Priority 1: Quit
+    // Priority 1: Quit / Back
     if (input === 'q') {
-      exit();
+      onBack();
       return;
     }
 
@@ -1703,6 +1708,14 @@ function StatsApp({ period }: { period: number }) {
       )}
     </Box>
   );
+}
+
+// --- Standalone App Wrapper ---
+
+function StatsApp({ period }: { period: number }) {
+  const { exit } = useApp();
+  const { width, height } = useScreenSize();
+  return <StatsContent width={width} height={height} period={period} onBack={exit} />;
 }
 
 // --- Non-interactive Summary ---

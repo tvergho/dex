@@ -37,8 +37,10 @@ tests/
 │   ├── index.ts        # Re-exports all helpers
 │   ├── db.ts           # TestDatabase class for isolated DB tests
 │   ├── temp.ts         # Temporary directory management
-│   ├── cli.ts          # Console/process mocking
+│   ├── cli.ts          # Console/process mocking + setupCliTest
+│   ├── mocks.ts        # Adapter and embedding mocking
 │   ├── assertions.ts   # Custom file/directory assertions
+│   ├── sources.ts      # Mock source data generators
 │   └── time.ts         # Date/time utilities
 ├── unit/               # Unit tests (pure functions)
 │   ├── utils/
@@ -181,18 +183,41 @@ await temp.cleanupAll();                            // Cleanup all
 
 ### CLI Mocking
 
-Capture console output and process.exit:
+Capture console output, process.exit, and force non-TTY mode:
 
 ```typescript
+// Combined helper (recommended)
+const cli = setupCliTest();
+// ... run command ...
+expect(cli.getOutput()).toContain('Expected output');
+expect(cli.getErrorOutput()).toContain('Error message');
+expect(cli.exitWasCalled()).toBe(true);
+expect(cli.getExitCode()).toBe(1);
+cli.restore();
+
+// Individual helpers
 const mock = mockConsole();
-// ... run code that logs ...
-expect(mock.logs).toContain('Expected output');
 mock.restore();
 
 const exitMock = mockProcessExit();
-// ... run code that exits ...
-expect(exitMock.getExitCode()).toBe(1);
 exitMock.restore();
+```
+
+### Adapter Mocking
+
+Mock adapters for sync command testing:
+
+```typescript
+import { setupSyncMocks, mockEmbeddings } from '../../helpers';
+
+beforeEach(() => {
+  mockEmbeddings(); // Prevent background embedding
+  setupSyncMocks([{
+    name: Source.Cursor,
+    locations: [{ workspacePath: '/test/project' }],
+    conversations: [{ id: 'conv-1' }],
+  }]);
+});
 ```
 
 ### Assertions

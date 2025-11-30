@@ -189,6 +189,9 @@ bun run typecheck
 # Linting
 bun run lint
 bun run lint:fix
+
+# Run tests
+bun run test:all
 ```
 
 ## How It Works

@@ -252,10 +252,14 @@ Stores conversations in JSON files with a hierarchical structure:
 
 ## Testing
 
+**366 tests** covering adapters, database, utilities, schema, and CLI commands.
+
 ### Running Tests
 
 ```bash
-bun test                    # Run all tests
+bun run test:all            # Run all tests (Bun + Node.js Cursor tests)
+bun test                    # Run Bun tests only
+bun run test:cursor         # Run Cursor adapter tests (Node.js)
 bun test --watch            # Watch mode
 bun test --coverage         # With coverage report
 bun test tests/unit/        # Run only unit tests
@@ -271,15 +275,18 @@ tests/
 ├── helpers/                # Shared test utilities
 │   ├── db.ts               # TestDatabase for isolated DB tests
 │   ├── temp.ts             # Temporary directory management
-│   ├── cli.ts              # Console/process mocking
+│   ├── cli.ts              # Console/process mocking + setupCliTest
+│   ├── mocks.ts            # Adapter and embedding mocks
 │   ├── assertions.ts       # Custom file assertions
+│   ├── sources.ts          # Mock source data generators
 │   └── time.ts             # Date utilities
 ├── unit/                   # Pure function tests
-│   └── utils/
-│       └── export.test.ts
+│   ├── utils/              # export, format, config, platform
+│   ├── db/                 # repository, analytics
+│   ├── schema/             # Zod schema validation
+│   └── adapters/           # All 4 adapters (cursor uses Node.js)
 └── integration/            # Tests with I/O
-    └── commands/
-        └── export.test.ts
+    └── commands/           # export, backup, import, list, show, sync, status
 ```
 
 ### Writing Tests
@@ -298,29 +305,35 @@ it('generates filename', () => {
 
 **Integration tests** - Test with database/filesystem:
 ```typescript
-import { TestDatabase, TempDir, mockConsole } from '../../helpers';
+import { TestDatabase, TempDir, setupCliTest } from '../../helpers';
 import { createConversation, createMessage } from '../../fixtures';
 
 let db: TestDatabase;
-let temp: TempDir;
+let cli: ReturnType<typeof setupCliTest>;
 
 beforeEach(async () => {
   db = new TestDatabase();
-  temp = new TempDir();
+  cli = setupCliTest();
   await db.setup();
 });
 
 afterEach(async () => {
-  await temp.cleanupAll();
+  cli.restore();
   await db.teardown();
 });
 
-it('exports conversations', async () => {
+it('lists conversations', async () => {
   await db.seed({ conversations: [createConversation()] });
-  const outputDir = await temp.create();
-  // ... test export ...
+  const { listCommand } = await import('../../../src/cli/commands/list');
+  await listCommand({});
+  expect(cli.getOutput()).toContain('Conversations');
 });
 ```
+
+### Cursor Adapter Tests
+
+The Cursor adapter uses `better-sqlite3` which has compatibility issues with Bun.
+Cursor tests run separately with Node.js via `bun run test:cursor`.
 
 ### Manual Testing
 

@@ -18,6 +18,7 @@ import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index';
 import { conversationRepo, search, messageRepo, filesRepo, messageFilesRepo } from '../../db/repository';
 import { runSync, needsSync, type SyncProgress } from './sync';
+import { StatsContent } from './stats';
 import {
   ResultRow,
   MatchesView,
@@ -49,7 +50,7 @@ const LOGO = `
  \\__,_|\\___/_/\\_\\
 `.trim();
 
-type ViewMode = 'home' | 'list' | 'search' | 'matches' | 'conversation' | 'message';
+type ViewMode = 'home' | 'list' | 'search' | 'matches' | 'conversation' | 'message' | 'stats';
 
 function ConversationListItem({
   conversation,
@@ -195,6 +196,8 @@ function HomeScreen({
           <Text color="gray">Type to search · </Text>
           <Text color="white" bold>Tab</Text>
           <Text color="gray"> recent · </Text>
+          <Text color="white" bold>^s</Text>
+          <Text color="gray"> stats · </Text>
           <Text color="white" bold>Enter</Text>
           <Text color="gray"> go · </Text>
           <Text color="white" bold>q</Text>
@@ -526,6 +529,11 @@ function UnifiedApp() {
         setSearchQuery((q) => q.slice(0, -1));
         return;
       }
+      // Ctrl+s to open stats dashboard
+      if (input === 's' && key.ctrl) {
+        setViewMode('stats');
+        return;
+      }
       // Type to search (any character, including 'r')
       if (input && input.length === 1 && !key.ctrl && !key.meta) {
         setSearchQuery((q) => q + input);
@@ -705,6 +713,18 @@ function UnifiedApp() {
         searchQuery={searchQuery}
         syncStatus={syncStatus}
         conversationCount={conversationCount}
+      />
+    );
+  }
+
+  // Stats dashboard
+  if (viewMode === 'stats') {
+    return (
+      <StatsContent
+        width={width}
+        height={height}
+        period={30}
+        onBack={() => setViewMode('home')}
       />
     );
   }
