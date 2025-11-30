@@ -7,11 +7,17 @@
  * Or use --summary for quick non-interactive output
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index';
 import { messageRepo, filesRepo, messageFilesRepo, conversationRepo } from '../../db/repository';
+import { ExportActionMenu, ExportPreviewModal, StatusToast, getPreviewMaxOffset } from '../components/index';
+import {
+  exportConversationsToFile,
+  exportConversationsToClipboard,
+  generatePreviewContent,
+} from '../../utils/export-actions';
 import {
   createPeriodFilter,
   getOverviewStats,
@@ -901,6 +907,18 @@ function StatsApp({ period }: { period: number }) {
   const [projectConversations, setProjectConversations] = useState<Conversation[]>([]);
   const [projectSelectedIndex, setProjectSelectedIndex] = useState(0);
 
+  // Export state
+  type ExportMode = 'none' | 'action-menu' | 'preview';
+  const [exportMode, setExportMode] = useState<ExportMode>('none');
+  const [exportActionIndex, setExportActionIndex] = useState(0);
+  const [previewContent, setPreviewContent] = useState('');
+  const [previewScrollOffset, setPreviewScrollOffset] = useState(0);
+
+  // Status toast
+  const [statusMessage, setStatusMessage] = useState('');
+  const [statusType, setStatusType] = useState<'success' | 'error'>('success');
+  const [statusVisible, setStatusVisible] = useState(false);
+
   // Use refs to track values and avoid stale closures in useInput
   const messageCountRef = useRef(0);
   messageCountRef.current = combinedMessages.length;
@@ -1015,6 +1033,71 @@ function StatsApp({ period }: { period: number }) {
     setConversationMessageFiles(msgFiles);
   }
 
+  // Show status toast with auto-dismiss
+  const showStatus = useCallback((message: string, type: 'success' | 'error') => {
+    setStatusMessage(message);
+    setStatusType(type);
+    setStatusVisible(true);
+    setTimeout(() => setStatusVisible(false), 3000);
+  }, []);
+
+  // Get current conversation for export based on context
+  const getCurrentConversation = useCallback(async (): Promise<Conversation | null> => {
+    // If viewing a conversation
+    if (selectedConversation) {
+      return selectedConversation;
+    }
+    // If in project-conversations view
+    if (viewMode === 'project-conversations' && projectConversations[projectSelectedIndex]) {
+      return projectConversations[projectSelectedIndex]!;
+    }
+    // If focused on recent conversations
+    if (focusSection === 'recent' && data?.recentConversations[selectedIndex]) {
+      const convId = data.recentConversations[selectedIndex]!.id;
+      return await conversationRepo.findById(convId);
+    }
+    // If focused on top conversations
+    if (focusSection === 'top' && data?.topConversations[selectedIndex]) {
+      return data.topConversations[selectedIndex]!;
+    }
+    return null;
+  }, [selectedConversation, viewMode, projectConversations, projectSelectedIndex, focusSection, data, selectedIndex]);
+
+  // Execute the selected export action
+  const executeExportAction = useCallback(async () => {
+    const conv = await getCurrentConversation();
+    if (!conv) return;
+
+    try {
+      if (exportActionIndex === 0) {
+        // Export to file
+        const outputDir = await exportConversationsToFile([conv]);
+        showStatus(`Exported to ${outputDir}`, 'success');
+        setExportMode('none');
+        setExportActionIndex(0);
+      } else if (exportActionIndex === 1) {
+        // Copy to clipboard
+        await exportConversationsToClipboard([conv]);
+        showStatus('Copied to clipboard', 'success');
+        setExportMode('none');
+        setExportActionIndex(0);
+      } else if (exportActionIndex === 2) {
+        // Show preview
+        const content = await generatePreviewContent(conv);
+        setPreviewContent(content);
+        setPreviewScrollOffset(0);
+        setExportMode('preview');
+      }
+    } catch (err) {
+      showStatus(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      setExportMode('none');
+    }
+  }, [getCurrentConversation, exportActionIndex, showStatus]);
+
+  // Preview content height for scrolling
+  const previewContentHeight = height - 5;
+  const previewMaxOffset = getPreviewMaxOffset(previewContent, previewContentHeight);
+
   // Handle Enter key to view selected conversation or drill down
   async function handleEnterKey() {
     if (!data) return;
@@ -1043,17 +1126,49 @@ function StatsApp({ period }: { period: number }) {
   }
 
   useInput((input, key) => {
+    // Priority 1: Quit
+    if (input === 'q') {
+      exit();
+      return;
+    }
+
+    // Priority 2: Export preview mode
+    if (exportMode === 'preview') {
+      if (input === 'j' || key.downArrow) {
+        setPreviewScrollOffset((o) => Math.min(o + 1, previewMaxOffset));
+      } else if (input === 'k' || key.upArrow) {
+        setPreviewScrollOffset((o) => Math.max(o - 1, 0));
+      } else if (input === 'g') {
+        setPreviewScrollOffset(0);
+      } else if (input === 'G') {
+        setPreviewScrollOffset(previewMaxOffset);
+      } else if (key.escape) {
+        setExportMode('action-menu');
+      }
+      return;
+    }
+
+    // Priority 3: Export action menu
+    if (exportMode === 'action-menu') {
+      if (input === 'j' || key.downArrow) {
+        setExportActionIndex((i) => Math.min(i + 1, 2));
+      } else if (input === 'k' || key.upArrow) {
+        setExportActionIndex((i) => Math.max(i - 1, 0));
+      } else if (key.return) {
+        executeExportAction();
+      } else if (key.escape) {
+        setExportMode('none');
+        setExportActionIndex(0);
+      }
+      return;
+    }
+
     // Handle message detail view mode
     if (viewMode === 'message' && combinedMessages.length > 0) {
       const currentMessage = combinedMessages[selectedMessageIndex];
       if (key.escape || key.backspace || key.delete || input === 'b') {
         setViewMode('conversation');
         setMessageScrollOffset(0);
-        return;
-      }
-
-      if (input === 'q') {
-        exit();
         return;
       }
 
@@ -1095,8 +1210,9 @@ function StatsApp({ period }: { period: number }) {
         return;
       }
 
-      if (input === 'q') {
-        exit();
+      // Export trigger
+      if (input === 'e') {
+        setExportMode('action-menu');
         return;
       }
 
@@ -1164,8 +1280,9 @@ function StatsApp({ period }: { period: number }) {
         return;
       }
 
-      if (input === 'q') {
-        exit();
+      // Export trigger
+      if (input === 'e' && projectConversations[projectSelectedIndex]) {
+        setExportMode('action-menu');
         return;
       }
 
@@ -1185,17 +1302,18 @@ function StatsApp({ period }: { period: number }) {
       return;
     }
 
-    // Dashboard mode
-    if (input === 'q') {
-      exit();
-      return;
-    }
-
+    // Dashboard mode - focused section handling
     // If in a focused section, handle navigation
     if (focusSection !== null) {
       if (key.escape || key.backspace || key.delete) {
         setFocusSection(null);
         setSelectedIndex(0);
+        return;
+      }
+
+      // Export trigger in focused sections (recent, top)
+      if (input === 'e' && (focusSection === 'recent' || focusSection === 'top')) {
+        setExportMode('action-menu');
         return;
       }
 
@@ -1394,6 +1512,7 @@ function StatsApp({ period }: { period: number }) {
           </Box>
           <Box paddingX={1}>
             <Text>
+              <Text color="white">e</Text><Text dimColor>: export · </Text>
               <Text color="white">j/k</Text><Text dimColor>: select · </Text>
               <Text color="white">Enter</Text><Text dimColor>: view full · </Text>
               <Text color="white">g/G</Text><Text dimColor>: top/bottom · </Text>
@@ -1402,6 +1521,37 @@ function StatsApp({ period }: { period: number }) {
             </Text>
           </Box>
         </Box>
+
+        {/* Export action menu overlay */}
+        {exportMode === 'action-menu' && (
+          <ExportActionMenu
+            selectedIndex={exportActionIndex}
+            conversationCount={1}
+            width={width}
+            height={height}
+          />
+        )}
+
+        {/* Export preview overlay */}
+        {exportMode === 'preview' && (
+          <ExportPreviewModal
+            content={previewContent}
+            title={selectedConversation.title}
+            scrollOffset={previewScrollOffset}
+            width={width}
+            height={height}
+          />
+        )}
+
+        {/* Status toast */}
+        {statusVisible && (
+          <StatusToast
+            message={statusMessage}
+            type={statusType}
+            width={width}
+            height={height}
+          />
+        )}
       </Box>
     );
   }
@@ -1441,6 +1591,7 @@ function StatsApp({ period }: { period: number }) {
           </Box>
           <Box paddingX={1}>
             <Text>
+              <Text color="white">e</Text><Text dimColor>: export · </Text>
               <Text color="white">j/k</Text><Text dimColor>: select · </Text>
               <Text color="white">Enter</Text><Text dimColor>: view conversation · </Text>
               <Text color="white">esc/b</Text><Text dimColor>: back · </Text>
@@ -1448,6 +1599,37 @@ function StatsApp({ period }: { period: number }) {
             </Text>
           </Box>
         </Box>
+
+        {/* Export action menu overlay */}
+        {exportMode === 'action-menu' && (
+          <ExportActionMenu
+            selectedIndex={exportActionIndex}
+            conversationCount={1}
+            width={width}
+            height={height}
+          />
+        )}
+
+        {/* Export preview overlay */}
+        {exportMode === 'preview' && projectConversations[projectSelectedIndex] && (
+          <ExportPreviewModal
+            content={previewContent}
+            title={projectConversations[projectSelectedIndex]!.title}
+            scrollOffset={previewScrollOffset}
+            width={width}
+            height={height}
+          />
+        )}
+
+        {/* Status toast */}
+        {statusVisible && (
+          <StatusToast
+            message={statusMessage}
+            type={statusType}
+            width={width}
+            height={height}
+          />
+        )}
       </Box>
     );
   }
@@ -1455,8 +1637,10 @@ function StatsApp({ period }: { period: number }) {
   // Dashboard footer text based on state
   const getFooterText = () => {
     if (focusSection !== null) {
+      const canExport = focusSection === 'recent' || focusSection === 'top';
       return (
         <Text>
+          {canExport && <><Text color="white">e</Text><Text dimColor>: export · </Text></>}
           <Text color="white">j/k</Text><Text dimColor>: select · </Text>
           <Text color="white">Enter</Text><Text dimColor>: view · </Text>
           <Text color="white">esc</Text><Text dimColor>: back · </Text>
@@ -1558,6 +1742,37 @@ function StatsApp({ period }: { period: number }) {
           {getFooterText()}
         </Box>
       </Box>
+
+      {/* Export action menu overlay */}
+      {exportMode === 'action-menu' && (
+        <ExportActionMenu
+          selectedIndex={exportActionIndex}
+          conversationCount={1}
+          width={width}
+          height={height}
+        />
+      )}
+
+      {/* Export preview overlay */}
+      {exportMode === 'preview' && (
+        <ExportPreviewModal
+          content={previewContent}
+          title="Preview"
+          scrollOffset={previewScrollOffset}
+          width={width}
+          height={height}
+        />
+      )}
+
+      {/* Status toast */}
+      {statusVisible && (
+        <StatusToast
+          message={statusMessage}
+          type={statusType}
+          width={width}
+          height={height}
+        />
+      )}
     </Box>
   );
 }

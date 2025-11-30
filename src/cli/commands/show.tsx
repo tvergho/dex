@@ -7,12 +7,18 @@
  * Navigate with j/k, view full messages with Enter
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index';
 import { conversationRepo, messageRepo, filesRepo, messageFilesRepo } from '../../db/repository';
 import type { Conversation, Message, ConversationFile, MessageFile } from '../../schema/index';
+import { ExportActionMenu, ExportPreviewModal, StatusToast, getPreviewMaxOffset } from '../components/index';
+import {
+  exportConversationsToFile,
+  exportConversationsToClipboard,
+  generatePreviewContent,
+} from '../../utils/export-actions';
 
 function MessageView({
   message,
@@ -63,6 +69,8 @@ function MessageView({
   );
 }
 
+type ExportMode = 'none' | 'action-menu' | 'preview';
+
 function ShowApp({ conversationId }: { conversationId: string }) {
   const { exit } = useApp();
   const { width, height } = useScreenSize();
@@ -73,6 +81,17 @@ function ShowApp({ conversationId }: { conversationId: string }) {
   const [files, setFiles] = useState<ConversationFile[]>([]);
   const [messageFiles, setMessageFiles] = useState<MessageFile[]>([]);
   const [scrollOffset, setScrollOffset] = useState(0);
+
+  // Export state
+  const [exportMode, setExportMode] = useState<ExportMode>('none');
+  const [exportActionIndex, setExportActionIndex] = useState(0);
+  const [previewContent, setPreviewContent] = useState('');
+  const [previewScrollOffset, setPreviewScrollOffset] = useState(0);
+
+  // Status toast
+  const [statusMessage, setStatusMessage] = useState('');
+  const [statusType, setStatusType] = useState<'success' | 'error'>('success');
+  const [statusVisible, setStatusVisible] = useState(false);
 
   useEffect(() => {
     async function loadConversation() {
@@ -109,12 +128,99 @@ function ShowApp({ conversationId }: { conversationId: string }) {
   // Scroll offset should stop when last message is visible at bottom
   const maxOffset = Math.max(0, messages.length - messagesPerPage);
 
+  // Show status toast with auto-dismiss
+  const showStatus = useCallback((message: string, type: 'success' | 'error') => {
+    setStatusMessage(message);
+    setStatusType(type);
+    setStatusVisible(true);
+    setTimeout(() => setStatusVisible(false), 3000);
+  }, []);
+
+  // Execute the selected export action
+  const executeExportAction = useCallback(async () => {
+    if (!conversation) return;
+
+    try {
+      if (exportActionIndex === 0) {
+        // Export to file
+        const outputDir = await exportConversationsToFile([conversation]);
+        showStatus(`Exported to ${outputDir}`, 'success');
+        setExportMode('none');
+        setExportActionIndex(0);
+      } else if (exportActionIndex === 1) {
+        // Copy to clipboard
+        await exportConversationsToClipboard([conversation]);
+        showStatus('Copied to clipboard', 'success');
+        setExportMode('none');
+        setExportActionIndex(0);
+      } else if (exportActionIndex === 2) {
+        // Show preview
+        const content = await generatePreviewContent(conversation);
+        setPreviewContent(content);
+        setPreviewScrollOffset(0);
+        setExportMode('preview');
+      }
+    } catch (err) {
+      showStatus(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      setExportMode('none');
+    }
+  }, [conversation, exportActionIndex, showStatus]);
+
+  // Preview content height for scrolling
+  const previewContentHeight = height - 5; // header + footer
+  const previewMaxOffset = getPreviewMaxOffset(previewContent, previewContentHeight);
+
   useInput((input, key) => {
-    if (input === 'q' || key.escape) {
+    // Priority 1: Quit
+    if (input === 'q') {
       exit();
       return;
     }
 
+    // Priority 2: Export preview mode
+    if (exportMode === 'preview') {
+      if (input === 'j' || key.downArrow) {
+        setPreviewScrollOffset((o) => Math.min(o + 1, previewMaxOffset));
+      } else if (input === 'k' || key.upArrow) {
+        setPreviewScrollOffset((o) => Math.max(o - 1, 0));
+      } else if (input === 'g') {
+        setPreviewScrollOffset(0);
+      } else if (input === 'G') {
+        setPreviewScrollOffset(previewMaxOffset);
+      } else if (key.escape) {
+        setExportMode('action-menu');
+      }
+      return;
+    }
+
+    // Priority 3: Export action menu
+    if (exportMode === 'action-menu') {
+      if (input === 'j' || key.downArrow) {
+        setExportActionIndex((i) => Math.min(i + 1, 2));
+      } else if (input === 'k' || key.upArrow) {
+        setExportActionIndex((i) => Math.max(i - 1, 0));
+      } else if (key.return) {
+        executeExportAction();
+      } else if (key.escape) {
+        setExportMode('none');
+        setExportActionIndex(0);
+      }
+      return;
+    }
+
+    // Priority 4: Normal mode - export trigger
+    if (input === 'e' && conversation) {
+      setExportMode('action-menu');
+      return;
+    }
+
+    // Priority 5: Escape exits in normal mode
+    if (key.escape) {
+      exit();
+      return;
+    }
+
+    // Priority 6: Normal scrolling
     if (messages.length === 0) return;
 
     if (input === 'j' || key.downArrow) {
@@ -214,12 +320,45 @@ function ShowApp({ conversationId }: { conversationId: string }) {
       {/* Footer */}
       <Box flexDirection="column">
         <Box paddingX={1}>
-          <Text dimColor>{'─'.repeat(Math.max(0, width - 2))}</Text>
+          <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
         </Box>
         <Box paddingX={1}>
-          <Text dimColor>j/k: scroll · g/G: top/bottom · q: quit</Text>
+          <Text color="gray">
+            <Text bold color="white">e</Text> export · <Text bold color="white">j/k</Text> scroll · <Text bold color="white">g/G</Text> top/bottom · <Text bold color="white">q</Text> quit
+          </Text>
         </Box>
       </Box>
+
+      {/* Export action menu overlay */}
+      {exportMode === 'action-menu' && (
+        <ExportActionMenu
+          selectedIndex={exportActionIndex}
+          conversationCount={1}
+          width={width}
+          height={height}
+        />
+      )}
+
+      {/* Export preview overlay */}
+      {exportMode === 'preview' && (
+        <ExportPreviewModal
+          content={previewContent}
+          title={conversation.title}
+          scrollOffset={previewScrollOffset}
+          width={width}
+          height={height}
+        />
+      )}
+
+      {/* Status toast */}
+      {statusVisible && (
+        <StatusToast
+          message={statusMessage}
+          type={statusType}
+          width={width}
+          height={height}
+        />
+      )}
     </Box>
   );
 }

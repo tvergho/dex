@@ -7,7 +7,7 @@
  * Navigate with j/k, select with Enter to get conversation ID
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index';
@@ -23,6 +23,12 @@ import {
   getLineCountParts,
 } from '../../utils/format';
 import type { Conversation } from '../../schema/index';
+import { ExportActionMenu, ExportPreviewModal, StatusToast, getPreviewMaxOffset } from '../components/index';
+import {
+  exportConversationsToFile,
+  exportConversationsToClipboard,
+  generatePreviewContent,
+} from '../../utils/export-actions';
 
 interface ListOptions {
   limit?: string;
@@ -32,15 +38,20 @@ interface ListOptions {
 function ConversationRow({
   conversation,
   isSelected,
+  isChecked,
+  multiSelectMode,
   width,
 }: {
   conversation: Conversation;
   isSelected: boolean;
+  isChecked?: boolean;
+  multiSelectMode?: boolean;
   width: number;
 }) {
   const metaWidth = 25;
+  const checkboxWidth = multiSelectMode ? 4 : 0;
   const prefixWidth = 3;
-  const maxTitleWidth = Math.max(20, width - metaWidth - prefixWidth - 4);
+  const maxTitleWidth = Math.max(20, width - metaWidth - prefixWidth - checkboxWidth - 4);
 
   const title = conversation.title.length > maxTitleWidth
     ? conversation.title.slice(0, maxTitleWidth - 1) + '…'
@@ -72,12 +83,17 @@ function ConversationRow({
         <Text color={isSelected ? 'black' : undefined} backgroundColor={isSelected ? 'cyan' : undefined}>
           {isSelected ? ' ▸ ' : '   '}
         </Text>
+        {multiSelectMode && (
+          <Text color={isChecked ? 'green' : 'gray'}>
+            {isChecked ? '[✓] ' : '[ ] '}
+          </Text>
+        )}
         <Text color={isSelected ? 'cyan' : 'white'} bold={isSelected} underline={isSelected}>
           {title}
         </Text>
         <Text dimColor> · {msgStr} · {timeStr}</Text>
       </Box>
-      <Box marginLeft={3}>
+      <Box marginLeft={multiSelectMode ? 7 : 3}>
         <Text color="yellow">{sourceName}</Text>
         {displayPath && (
           <>
@@ -104,6 +120,8 @@ function ConversationRow({
   );
 }
 
+type ExportMode = 'none' | 'action-menu' | 'preview';
+
 function ListApp({
   limit,
   source,
@@ -117,6 +135,21 @@ function ListApp({
   const [error, setError] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
+
+  // Multi-select state
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Export state
+  const [exportMode, setExportMode] = useState<ExportMode>('none');
+  const [exportActionIndex, setExportActionIndex] = useState(0);
+  const [previewContent, setPreviewContent] = useState('');
+  const [previewScrollOffset, setPreviewScrollOffset] = useState(0);
+
+  // Status toast
+  const [statusMessage, setStatusMessage] = useState('');
+  const [statusType, setStatusType] = useState<'success' | 'error'>('success');
+  const [statusVisible, setStatusVisible] = useState(false);
 
   useEffect(() => {
     async function loadConversations() {
@@ -149,19 +182,155 @@ function ListApp({
     return conversations.slice(scrollOffset, scrollOffset + visibleCount);
   }, [conversations, scrollOffset, visibleCount]);
 
+  // Show status toast with auto-dismiss
+  const showStatus = useCallback((message: string, type: 'success' | 'error') => {
+    setStatusMessage(message);
+    setStatusType(type);
+    setStatusVisible(true);
+    setTimeout(() => setStatusVisible(false), 3000);
+  }, []);
+
+  // Get conversations to export
+  const getConversationsToExport = useCallback((): Conversation[] => {
+    if (multiSelectMode && selectedIds.size > 0) {
+      return conversations.filter((c) => selectedIds.has(c.id));
+    }
+    const current = conversations[selectedIndex];
+    return current ? [current] : [];
+  }, [conversations, selectedIndex, multiSelectMode, selectedIds]);
+
+  // Execute the selected export action
+  const executeExportAction = useCallback(async () => {
+    const toExport = getConversationsToExport();
+    if (toExport.length === 0) return;
+
+    try {
+      if (exportActionIndex === 0) {
+        // Export to file
+        const outputDir = await exportConversationsToFile(toExport);
+        showStatus(`Exported ${toExport.length} to ${outputDir}`, 'success');
+        setExportMode('none');
+        setExportActionIndex(0);
+        setMultiSelectMode(false);
+        setSelectedIds(new Set());
+      } else if (exportActionIndex === 1) {
+        // Copy to clipboard
+        await exportConversationsToClipboard(toExport);
+        showStatus(`Copied ${toExport.length} conversation(s)`, 'success');
+        setExportMode('none');
+        setExportActionIndex(0);
+        setMultiSelectMode(false);
+        setSelectedIds(new Set());
+      } else if (exportActionIndex === 2) {
+        // Show preview (only first conversation)
+        const content = await generatePreviewContent(toExport[0]!);
+        setPreviewContent(content);
+        setPreviewScrollOffset(0);
+        setExportMode('preview');
+      }
+    } catch (err) {
+      showStatus(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      setExportMode('none');
+    }
+  }, [getConversationsToExport, exportActionIndex, showStatus]);
+
+  // Preview content height for scrolling
+  const previewContentHeight = height - 5;
+  const previewMaxOffset = getPreviewMaxOffset(previewContent, previewContentHeight);
+
   useInput((input, key) => {
-    if (input === 'q' || key.escape) {
+    // Priority 1: Quit
+    if (input === 'q') {
+      exit();
+      return;
+    }
+
+    // Priority 2: Export preview mode
+    if (exportMode === 'preview') {
+      if (input === 'j' || key.downArrow) {
+        setPreviewScrollOffset((o) => Math.min(o + 1, previewMaxOffset));
+      } else if (input === 'k' || key.upArrow) {
+        setPreviewScrollOffset((o) => Math.max(o - 1, 0));
+      } else if (input === 'g') {
+        setPreviewScrollOffset(0);
+      } else if (input === 'G') {
+        setPreviewScrollOffset(previewMaxOffset);
+      } else if (key.escape) {
+        setExportMode('action-menu');
+      }
+      return;
+    }
+
+    // Priority 3: Export action menu
+    if (exportMode === 'action-menu') {
+      if (input === 'j' || key.downArrow) {
+        setExportActionIndex((i) => Math.min(i + 1, 2));
+      } else if (input === 'k' || key.upArrow) {
+        setExportActionIndex((i) => Math.max(i - 1, 0));
+      } else if (key.return) {
+        executeExportAction();
+      } else if (key.escape) {
+        setExportMode('none');
+        setExportActionIndex(0);
+      }
+      return;
+    }
+
+    // Priority 4: Multi-select mode
+    if (multiSelectMode) {
+      if (input === ' ') {
+        const current = conversations[selectedIndex];
+        if (current) {
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(current.id)) {
+              next.delete(current.id);
+            } else {
+              next.add(current.id);
+            }
+            return next;
+          });
+        }
+        return;
+      }
+      if (input === 'e' && selectedIds.size > 0) {
+        setExportMode('action-menu');
+        return;
+      }
+      if (input === 'v' || key.escape) {
+        setMultiSelectMode(false);
+        setSelectedIds(new Set());
+        return;
+      }
+      // Fall through to navigation
+    }
+
+    // Priority 5: Escape exits in normal mode
+    if (key.escape) {
       exit();
       return;
     }
 
     if (conversations.length === 0) return;
 
+    // Priority 6: Export trigger (single)
+    if (input === 'e' && !multiSelectMode) {
+      setExportMode('action-menu');
+      return;
+    }
+
+    // Priority 7: Multi-select trigger
+    if (input === 'v') {
+      setMultiSelectMode(true);
+      return;
+    }
+
+    // Priority 8: Navigation
     if (input === 'j' || key.downArrow) {
       setSelectedIndex((i) => Math.min(i + 1, conversations.length - 1));
     } else if (input === 'k' || key.upArrow) {
       setSelectedIndex((i) => Math.max(i - 1, 0));
-    } else if (key.return) {
+    } else if (key.return && !multiSelectMode) {
       const selected = conversations[selectedIndex];
       if (selected) {
         // Exit and print the ID so user can use it
@@ -226,6 +395,8 @@ function ListApp({
               <ConversationRow
                 conversation={conv}
                 isSelected={actualIndex === selectedIndex}
+                isChecked={selectedIds.has(conv.id)}
+                multiSelectMode={multiSelectMode}
                 width={width - 2}
               />
             </Box>
@@ -239,18 +410,53 @@ function ListApp({
           <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
         </Box>
         <Box paddingX={1} justifyContent="space-between">
-          <Text>
-            <Text color="white">j/k</Text><Text dimColor>: navigate · </Text>
-            <Text color="white">Enter</Text><Text dimColor>: select · </Text>
-            <Text color="white">q</Text><Text dimColor>: quit</Text>
-          </Text>
+          {multiSelectMode ? (
+            <Text color="gray">
+              <Text bold color="white">space</Text> toggle · <Text bold color="white">e</Text> export{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''} · <Text bold color="white">Esc</Text> cancel
+            </Text>
+          ) : (
+            <Text color="gray">
+              <Text bold color="white">e</Text> export · <Text bold color="white">v</Text> select · <Text bold color="white">j/k</Text> navigate · <Text bold color="white">Enter</Text> show · <Text bold color="white">q</Text> quit
+            </Text>
+          )}
           {conversations.length > visibleCount && (
-            <Text dimColor>
+            <Text color="gray">
               {scrollOffset + 1}-{Math.min(scrollOffset + visibleCount, conversations.length)} of {conversations.length}
             </Text>
           )}
         </Box>
       </Box>
+
+      {/* Export action menu overlay */}
+      {exportMode === 'action-menu' && (
+        <ExportActionMenu
+          selectedIndex={exportActionIndex}
+          conversationCount={getConversationsToExport().length}
+          width={width}
+          height={height}
+        />
+      )}
+
+      {/* Export preview overlay */}
+      {exportMode === 'preview' && (
+        <ExportPreviewModal
+          content={previewContent}
+          title={getConversationsToExport()[0]?.title ?? 'Preview'}
+          scrollOffset={previewScrollOffset}
+          width={width}
+          height={height}
+        />
+      )}
+
+      {/* Status toast */}
+      {statusVisible && (
+        <StatusToast
+          message={statusMessage}
+          type={statusType}
+          width={width}
+          height={height}
+        />
+      )}
     </Box>
   );
 }

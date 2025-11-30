@@ -3,3 +3,7 @@ export { ResultRow, type ResultRowProps } from './ResultRow';
 export { MatchesView, type MatchesViewProps } from './MatchesView';
 export { ConversationView, type ConversationViewProps } from './ConversationView';
 export { MessageDetailView, type MessageDetailViewProps } from './MessageDetailView';
+export { ExportActionMenu, type ExportActionMenuProps } from './ExportActionMenu';
+export { ExportPreviewModal, type ExportPreviewModalProps, getPreviewMaxOffset } from './ExportPreviewModal';
+export { StatusToast, type StatusToastProps } from './StatusToast';
+export { StatusBar, type StatusBarProps, type SyncStatus, type SyncPhase } from './StatusBar';

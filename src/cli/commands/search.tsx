@@ -10,7 +10,7 @@
  * 4. Message view - single message with full content
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index';
@@ -29,6 +29,10 @@ import {
   MatchesView,
   ConversationView,
   MessageDetailView,
+  ExportActionMenu,
+  ExportPreviewModal,
+  StatusToast,
+  getPreviewMaxOffset,
 } from '../components/index';
 import {
   formatRelativeTime,
@@ -38,7 +42,12 @@ import {
   combineConsecutiveMessages,
   type CombinedMessage,
 } from '../../utils/format';
-import type { SearchResponse, ConversationFile, MessageFile } from '../../schema/index';
+import {
+  exportConversationsToFile,
+  exportConversationsToClipboard,
+  generatePreviewContent,
+} from '../../utils/export-actions';
+import type { SearchResponse, ConversationFile, MessageFile, Conversation } from '../../schema/index';
 
 interface SearchOptions {
   limit?: string;
@@ -46,6 +55,7 @@ interface SearchOptions {
 }
 
 type ViewMode = 'list' | 'matches' | 'conversation' | 'message';
+type ExportMode = 'none' | 'action-menu' | 'preview';
 
 function SearchApp({
   query,
@@ -83,6 +93,21 @@ function SearchApp({
 
   // Message detail view state
   const [messageScrollOffset, setMessageScrollOffset] = useState(0);
+
+  // Multi-select state (only in list view)
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Export state
+  const [exportMode, setExportMode] = useState<ExportMode>('none');
+  const [exportActionIndex, setExportActionIndex] = useState(0);
+  const [previewContent, setPreviewContent] = useState('');
+  const [previewScrollOffset, setPreviewScrollOffset] = useState(0);
+
+  // Status toast
+  const [statusMessage, setStatusMessage] = useState('');
+  const [statusType, setStatusType] = useState<'success' | 'error'>('success');
+  const [statusVisible, setStatusVisible] = useState(false);
 
   useEffect(() => {
     async function runSearch() {
@@ -282,9 +307,110 @@ function SearchApp({
     }
   };
 
+  // Show status toast with auto-dismiss
+  const showStatus = useCallback((message: string, type: 'success' | 'error') => {
+    setStatusMessage(message);
+    setStatusType(type);
+    setStatusVisible(true);
+    setTimeout(() => setStatusVisible(false), 3000);
+  }, []);
+
+  // Get the current conversation for export (based on view mode)
+  const getCurrentConversation = useCallback((): Conversation | null => {
+    if (viewMode === 'list' && response) {
+      return response.results[selectedIndex]?.conversation ?? null;
+    }
+    if (expandedIndex !== null && response) {
+      return response.results[expandedIndex]?.conversation ?? null;
+    }
+    return null;
+  }, [viewMode, response, selectedIndex, expandedIndex]);
+
+  // Get conversations to export
+  const getConversationsToExport = useCallback((): Conversation[] => {
+    if (multiSelectMode && selectedIds.size > 0 && response) {
+      return response.results
+        .filter((r) => selectedIds.has(r.conversation.id))
+        .map((r) => r.conversation);
+    }
+    const current = getCurrentConversation();
+    return current ? [current] : [];
+  }, [multiSelectMode, selectedIds, response, getCurrentConversation]);
+
+  // Execute the selected export action
+  const executeExportAction = useCallback(async () => {
+    const toExport = getConversationsToExport();
+    if (toExport.length === 0) return;
+
+    try {
+      if (exportActionIndex === 0) {
+        // Export to file
+        const outputDir = await exportConversationsToFile(toExport);
+        showStatus(`Exported ${toExport.length} to ${outputDir}`, 'success');
+        setExportMode('none');
+        setExportActionIndex(0);
+        setMultiSelectMode(false);
+        setSelectedIds(new Set());
+      } else if (exportActionIndex === 1) {
+        // Copy to clipboard
+        await exportConversationsToClipboard(toExport);
+        showStatus(`Copied ${toExport.length} conversation(s)`, 'success');
+        setExportMode('none');
+        setExportActionIndex(0);
+        setMultiSelectMode(false);
+        setSelectedIds(new Set());
+      } else if (exportActionIndex === 2) {
+        // Show preview (only first conversation)
+        const content = await generatePreviewContent(toExport[0]!);
+        setPreviewContent(content);
+        setPreviewScrollOffset(0);
+        setExportMode('preview');
+      }
+    } catch (err) {
+      showStatus(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      setExportMode('none');
+    }
+  }, [getConversationsToExport, exportActionIndex, showStatus]);
+
+  // Preview content height for scrolling
+  const previewContentHeight = height - 5;
+  const previewMaxOffset = getPreviewMaxOffset(previewContent, previewContentHeight);
+
   useInput((input, key) => {
+    // Priority 1: Quit
     if (input === 'q') {
       exit();
+      return;
+    }
+
+    // Priority 2: Export preview mode
+    if (exportMode === 'preview') {
+      if (input === 'j' || key.downArrow) {
+        setPreviewScrollOffset((o) => Math.min(o + 1, previewMaxOffset));
+      } else if (input === 'k' || key.upArrow) {
+        setPreviewScrollOffset((o) => Math.max(o - 1, 0));
+      } else if (input === 'g') {
+        setPreviewScrollOffset(0);
+      } else if (input === 'G') {
+        setPreviewScrollOffset(previewMaxOffset);
+      } else if (key.escape) {
+        setExportMode('action-menu');
+      }
+      return;
+    }
+
+    // Priority 3: Export action menu
+    if (exportMode === 'action-menu') {
+      if (input === 'j' || key.downArrow) {
+        setExportActionIndex((i) => Math.min(i + 1, 2));
+      } else if (input === 'k' || key.upArrow) {
+        setExportActionIndex((i) => Math.max(i - 1, 0));
+      } else if (key.return) {
+        executeExportAction();
+      } else if (key.escape) {
+        setExportMode('none');
+        setExportActionIndex(0);
+      }
       return;
     }
 
@@ -405,15 +531,60 @@ function SearchApp({
       }
     } else {
       // List view navigation
+
+      // Multi-select mode handling
+      if (multiSelectMode) {
+        if (input === ' ') {
+          const current = response.results[selectedIndex];
+          if (current) {
+            setSelectedIds((prev) => {
+              const next = new Set(prev);
+              if (next.has(current.conversation.id)) {
+                next.delete(current.conversation.id);
+              } else {
+                next.add(current.conversation.id);
+              }
+              return next;
+            });
+          }
+          return;
+        }
+        if (input === 'e' && selectedIds.size > 0) {
+          setExportMode('action-menu');
+          return;
+        }
+        if (input === 'v' || key.escape) {
+          setMultiSelectMode(false);
+          setSelectedIds(new Set());
+          return;
+        }
+        // Fall through to navigation
+      }
+
+      // Export trigger (single conversation, any view)
+      if (input === 'e' && !multiSelectMode) {
+        setExportMode('action-menu');
+        return;
+      }
+
+      // Multi-select trigger
+      if (input === 'v') {
+        setMultiSelectMode(true);
+        return;
+      }
+
+      // Standard navigation
       if (input === 'j' || key.downArrow) {
         setSelectedIndex((i) => Math.min(i + 1, response.results.length - 1));
       } else if (input === 'k' || key.upArrow) {
         setSelectedIndex((i) => Math.max(i - 1, 0));
       } else if (key.return || input === 'o') {
-        setViewMode('matches');
-        setExpandedIndex(selectedIndex);
-        setExpandedScrollOffset(0);
-        setExpandedSelectedMatch(0);
+        if (!multiSelectMode) {
+          setViewMode('matches');
+          setExpandedIndex(selectedIndex);
+          setExpandedScrollOffset(0);
+          setExpandedSelectedMatch(0);
+        }
       }
     }
   });
@@ -476,15 +647,28 @@ function SearchApp({
   } else if (viewMode === 'matches') {
     footerContent = (
       <>
+        <Key k="e" /><Text dimColor>: export</Text><Sep />
         <Key k="j/k" /><Text dimColor>: navigate</Text><Sep />
         <Key k="Enter" /><Text dimColor>: view conversation</Text><Sep />
         <Key k="Esc" /><Text dimColor>: back</Text><Sep />
         <Key k="q" /><Text dimColor>: quit</Text>
       </>
     );
+  } else if (multiSelectMode) {
+    footerContent = (
+      <>
+        <Key k="space" /><Text dimColor>: toggle</Text><Sep />
+        <Key k="e" /><Text dimColor>: export{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}</Text><Sep />
+        <Key k="j/k" /><Text dimColor>: navigate</Text><Sep />
+        <Key k="Esc" /><Text dimColor>: cancel</Text><Sep />
+        <Key k="q" /><Text dimColor>: quit</Text>
+      </>
+    );
   } else {
     footerContent = (
       <>
+        <Key k="e" /><Text dimColor>: export</Text><Sep />
+        <Key k="v" /><Text dimColor>: select</Text><Sep />
         <Key k="j/k" /><Text dimColor>: navigate</Text><Sep />
         <Key k="Enter" /><Text dimColor>: expand</Text><Sep />
         <Key k="q" /><Text dimColor>: quit</Text>
@@ -564,15 +748,22 @@ function SearchApp({
           visibleResults.map((result, idx) => {
             const actualIndex = scrollOffset + idx;
             const convFileMatches = fileMatches.get(result.conversation.id);
+            const isChecked = selectedIds.has(result.conversation.id);
             return (
-              <ResultRow
-                key={result.conversation.id}
-                result={result}
-                isSelected={actualIndex === selectedIndex}
-                width={width - 2}
-                query={query}
-                fileMatches={convFileMatches}
-              />
+              <Box key={result.conversation.id} flexDirection="row">
+                {multiSelectMode && (
+                  <Text color={isChecked ? 'green' : 'gray'}>
+                    {isChecked ? '[✓] ' : '[ ] '}
+                  </Text>
+                )}
+                <ResultRow
+                  result={result}
+                  isSelected={actualIndex === selectedIndex}
+                  width={multiSelectMode ? width - 6 : width - 2}
+                  query={query}
+                  fileMatches={convFileMatches}
+                />
+              </Box>
             );
           })
         )}
@@ -586,12 +777,43 @@ function SearchApp({
         <Box paddingX={1} justifyContent="space-between">
           <Text>{footerContent}</Text>
           {viewMode === 'list' && response.results.length > visibleCount && (
-            <Text dimColor>
+            <Text color="gray">
               {scrollOffset + 1}-{Math.min(scrollOffset + visibleCount, response.results.length)} of {response.results.length}
             </Text>
           )}
         </Box>
       </Box>
+
+      {/* Export action menu overlay */}
+      {exportMode === 'action-menu' && (
+        <ExportActionMenu
+          selectedIndex={exportActionIndex}
+          conversationCount={getConversationsToExport().length}
+          width={width}
+          height={height}
+        />
+      )}
+
+      {/* Export preview overlay */}
+      {exportMode === 'preview' && (
+        <ExportPreviewModal
+          content={previewContent}
+          title={getConversationsToExport()[0]?.title ?? 'Preview'}
+          scrollOffset={previewScrollOffset}
+          width={width}
+          height={height}
+        />
+      )}
+
+      {/* Status toast */}
+      {statusVisible && (
+        <StatusToast
+          message={statusMessage}
+          type={statusType}
+          width={width}
+          height={height}
+        />
+      )}
     </Box>
   );
 }
