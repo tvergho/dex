@@ -9,7 +9,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { render, Box, Text } from 'ink';
-import { spawn, execSync } from 'child_process';
+import { spawn, exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { adapters } from '../../adapters/index';
@@ -40,16 +43,16 @@ import { printRichSummary } from './stats';
  * The embedding worker will be restarted after sync completes.
  * Also resets the progress state so the worker can be respawned.
  */
-function killEmbeddingProcesses(): void {
+async function killEmbeddingProcesses(): Promise<void> {
   try {
     // Find and kill any bun processes running embed.ts
     // This is platform-specific but works on macOS/Linux
     if (process.platform !== 'win32') {
-      execSync('pkill -f "bun.*embed\\.ts" 2>/dev/null || true', { stdio: 'ignore' });
+      await execAsync('pkill -f "bun.*embed\\.ts" 2>/dev/null || true').catch(() => {});
     }
     // Also kill any llama-server processes that might be running
     if (process.platform !== 'win32') {
-      execSync('pkill -f "llama-server" 2>/dev/null || true', { stdio: 'ignore' });
+      await execAsync('pkill -f "llama-server" 2>/dev/null || true').catch(() => {});
     }
   } catch {
     // Ignore errors - process may not exist
@@ -245,7 +248,7 @@ export async function runSync(
   try {
     // Kill any running embedding processes to prevent conflicts during sync
     // The embedding will be restarted after sync if new data was added
-    killEmbeddingProcesses();
+    await killEmbeddingProcesses();
 
     // Connect to database
     await connect();

@@ -25,8 +25,9 @@ src/
 │   └── index.ts        # Adapter registry
 ├── cli/
 │   ├── commands/       # CLI command implementations
-│   │   ├── search.tsx  # Search with 4-level navigation
-│   │   ├── list.tsx    # List conversations
+│   │   ├── unified.tsx # Home screen with tabs (default `dex` command)
+│   │   ├── search.tsx  # Direct search with 4-level navigation
+│   │   ├── list.tsx    # List conversations (non-TTY fallback)
 │   │   ├── show.tsx    # Show single conversation
 │   │   ├── sync.tsx    # Sync data from sources
 │   │   ├── status.tsx  # Embedding progress status
@@ -35,12 +36,18 @@ src/
 │   │   ├── backup.ts   # Full database backup (JSON)
 │   │   ├── import.ts   # Import from backup
 │   │   └── embed.ts    # Background embedding worker
-│   └── components/     # Reusable UI components
-│       ├── HighlightedText.tsx
-│       ├── ResultRow.tsx
-│       ├── MatchesView.tsx
-│       ├── ConversationView.tsx
-│       └── MessageDetailView.tsx
+│   ├── components/     # Reusable UI components
+│   │   ├── ConversationView.tsx
+│   │   ├── MessageDetailView.tsx
+│   │   ├── MatchesView.tsx
+│   │   ├── ResultRow.tsx
+│   │   ├── HighlightedText.tsx
+│   │   ├── ActivityHeatmap.tsx
+│   │   ├── ExportActionMenu.tsx
+│   │   └── StatusToast.tsx
+│   └── hooks/          # Reusable React hooks
+│       ├── useNavigation.ts  # 4-level drill-down state machine
+│       └── useExport.ts      # Export modal state
 ├── db/
 │   ├── index.ts        # LanceDB connection & table setup
 │   ├── repository.ts   # Data access layer
@@ -101,6 +108,89 @@ Four-level navigation pattern:
 2. **Matches view** - All matches in a conversation, Enter to view full conversation
 3. **Conversation view** - Full conversation with highlighted message, Enter for full message
 4. **Message view** - Single message with full content, j/k to scroll, n/p for next/prev
+
+## TUI Architecture
+
+### Command Entry Points
+
+The CLI has 5 main interactive commands, each implemented as a separate file in `src/cli/commands/`:
+
+| Command | File | Description |
+|---------|------|-------------|
+| `dex` (default) | `unified.tsx` | Home screen with tabs: Search, Recent, Stats |
+| `dex search <query>` | `search.tsx` | Direct search with 4-level drill-down |
+| `dex list` | `list.tsx` | Simple conversation list (non-TTY fallback) |
+| `dex show <id>` | `show.tsx` | Single conversation viewer |
+| `dex stats` | `stats.tsx` | Analytics dashboard with tabs |
+
+### unified.tsx vs search.tsx
+
+**Key distinction:** These are the two main interactive views with significant overlap.
+
+- **`unified.tsx`** (~970 LOC) - The default home screen when running `dex` with no arguments
+  - Tab-based navigation: Search | Recent | Stats
+  - Has its own search input in the Search tab
+  - Contains a full implementation of 4-level navigation (list → matches → conversation → message)
+  - Manages tab state, search state, AND navigation state
+
+- **`search.tsx`** (~900 LOC) - Direct search when running `dex search "query"`
+  - No tabs, goes straight to search results
+  - Same 4-level navigation as unified.tsx
+  - Simpler state (no tab management)
+
+**Why both exist:** `unified.tsx` provides a discoverable home screen for new users, while `search.tsx` provides fast direct access for power users who know what they're searching for.
+
+### View State Machines
+
+Both `unified.tsx` and `search.tsx` use a `ViewMode` enum to track navigation depth:
+
+```
+unified.tsx ViewMode:
+  'home' → 'search' → 'list' → 'matches' → 'conversation' → 'message'
+           (tabs)     (search results)
+
+search.tsx ViewMode:
+  'list' → 'matches' → 'conversation' → 'message'
+  (starts here after search)
+```
+
+Navigation flow:
+- `Enter` - Drill down to next level
+- `Esc` / `q` - Go back one level
+- `j/k` - Navigate within current level
+- `e` - Open export menu (available at all levels)
+
+### Shared Components
+
+Components in `src/cli/components/` are reused across commands:
+
+| Component | Used By | Purpose |
+|-----------|---------|---------|
+| `ConversationView` | unified, search, show | Display full conversation with messages |
+| `MessageDetailView` | unified, search, show | Single message with markdown rendering |
+| `MatchesView` | unified, search | Search matches within a conversation |
+| `ResultRow` | unified, search, list | Conversation list item |
+| `HighlightedText` | unified, search | Search term highlighting |
+| `ActivityHeatmap` | unified, stats | Git-style contribution heatmap |
+| `ExportActionMenu` | unified, search, list, show, stats | Export modal overlay |
+| `StatusToast` | unified, search, list, show, stats | Temporary success/error messages |
+
+### Hooks
+
+Hooks in `src/cli/hooks/` extract reusable logic:
+
+| Hook | Purpose |
+|------|---------|
+| `useNavigation` | 4-level drill-down state machine (list → matches → conversation → message) |
+| `useExport` | Export modal state, keyboard handling, file/clipboard actions |
+
+The `useNavigation` hook provides:
+- View mode state machine with transitions
+- Scroll offset management for each view level
+- Combined message merging and index mapping
+- Match navigation helpers (finding distinct matches)
+- Unified keyboard handler (`handleNavigationInput`)
+- File and message loading when expanding conversations
 
 ## Coding Conventions
 

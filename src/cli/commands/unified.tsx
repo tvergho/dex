@@ -16,8 +16,8 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index';
-import { conversationRepo, search, messageRepo, filesRepo, messageFilesRepo } from '../../db/repository';
-import { runSync, needsSync, type SyncProgress } from './sync';
+import { conversationRepo, search } from '../../db/repository';
+import { runSync, type SyncProgress } from './sync';
 import { StatsContent } from './stats';
 import {
   ResultRow,
@@ -30,17 +30,13 @@ import {
   StatusToast,
   type SyncStatus,
 } from '../components/index';
-import { useExport } from '../hooks/index';
+import { useExport, useNavigation, type NavigationViewMode } from '../hooks/index';
 import {
   formatRelativeTime,
-  truncatePath,
   formatTokenPair,
   getLineCountParts,
-  combineConsecutiveMessages,
-  getRenderedLineCount,
-  type CombinedMessage,
 } from '../../utils/format';
-import type { Conversation, ConversationFile, MessageFile, SearchResponse, ConversationResult } from '../../schema/index';
+import type { Conversation, SearchResponse, ConversationResult } from '../../schema/index';
 
 // ASCII art logo
 const LOGO = `
@@ -51,7 +47,8 @@ const LOGO = `
  \\__,_|\\___/_/\\_\\
 `.trim();
 
-type ViewMode = 'home' | 'list' | 'search' | 'matches' | 'conversation' | 'message' | 'stats';
+// Unified view mode includes home and stats in addition to navigation modes
+type UnifiedViewMode = 'home' | 'stats' | NavigationViewMode;
 
 function ConversationListItem({
   conversation,
@@ -66,8 +63,7 @@ function ConversationListItem({
   const msgCount = conversation.messageCount;
 
   // Calculate available width for title
-  // Format: [sel] Title                              time
-  const prefixWidth = 3; // "▸ " or "  "
+  const prefixWidth = 3;
   const timeWidth = timeStr.length + 2;
   const maxTitleWidth = Math.max(20, width - prefixWidth - timeWidth - 4);
 
@@ -75,7 +71,6 @@ function ConversationListItem({
     ? conversation.title.slice(0, maxTitleWidth - 1) + '…'
     : conversation.title;
 
-  // Secondary info: source badge + message count + optional stats
   const tokenStr = formatTokenPair(
     conversation.totalInputTokens,
     conversation.totalOutputTokens,
@@ -89,7 +84,6 @@ function ConversationListItem({
 
   return (
     <Box flexDirection="column">
-      {/* Row 1: Selection + Title + Time (right-aligned feel) */}
       <Box>
         <SelectionIndicator isSelected={isSelected} />
         <Text color={isSelected ? 'cyan' : 'white'} bold={isSelected}>
@@ -98,13 +92,10 @@ function ConversationListItem({
         <Box flexGrow={1} />
         <Text color="gray">{timeStr}</Text>
       </Box>
-      {/* Row 2: Source badge + message count + stats */}
       <Box marginLeft={3}>
         <SourceBadge source={conversation.source} />
         <Text color="gray"> · {msgCount} msgs</Text>
-        {tokenStr && (
-          <Text color="gray"> · {tokenStr}</Text>
-        )}
+        {tokenStr && <Text color="gray"> · {tokenStr}</Text>}
         {lineParts && (
           <>
             <Text color="gray"> · </Text>
@@ -132,12 +123,9 @@ function HomeScreen({
   conversationCount: number;
 }) {
   const logoLines = LOGO.split('\n');
-
-  // Search box
   const boxWidth = Math.min(60, width - 4);
   const innerWidth = boxWidth - 4;
 
-  // Sync status indicator
   const getSyncIndicator = () => {
     switch (syncStatus.phase) {
       case 'syncing':
@@ -161,7 +149,6 @@ function HomeScreen({
       alignItems="center"
       justifyContent="center"
     >
-      {/* Logo */}
       <Box flexDirection="column" alignItems="center" marginBottom={2}>
         {logoLines.map((line, i) => (
           <Text key={i} color="cyan" bold>{line}</Text>
@@ -169,11 +156,8 @@ function HomeScreen({
         <Text color="gray">Search your coding conversations</Text>
       </Box>
 
-      {/* Search box */}
       <Box flexDirection="column" alignItems="center" marginBottom={2}>
-        <Box>
-          <Text color="gray">╭{'─'.repeat(boxWidth - 2)}╮</Text>
-        </Box>
+        <Box><Text color="gray">╭{'─'.repeat(boxWidth - 2)}╮</Text></Box>
         <Box>
           <Text color="gray">│ </Text>
           <Text color="white">{searchQuery || ' '}</Text>
@@ -181,17 +165,11 @@ function HomeScreen({
           <Text>{' '.repeat(Math.max(0, innerWidth - searchQuery.length - 1))}</Text>
           <Text color="gray"> │</Text>
         </Box>
-        <Box>
-          <Text color="gray">╰{'─'.repeat(boxWidth - 2)}╯</Text>
-        </Box>
+        <Box><Text color="gray">╰{'─'.repeat(boxWidth - 2)}╯</Text></Box>
       </Box>
 
-      {/* Status */}
-      <Box marginBottom={2}>
-        {getSyncIndicator()}
-      </Box>
+      <Box marginBottom={2}>{getSyncIndicator()}</Box>
 
-      {/* Keyboard hints */}
       <Box flexDirection="column" alignItems="center">
         <Box>
           <Text color="gray">Type to search · </Text>
@@ -223,160 +201,23 @@ function UnifiedApp() {
   const [searchQuery, setSearchQuery] = useState('');
 
   // Sync state
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>({
-    phase: 'idle',
-  });
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ phase: 'idle' });
 
-  // Navigation state
-  const [viewMode, setViewMode] = useState<ViewMode>('home');
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  // High-level view mode (home, stats, or navigation modes)
+  const [unifiedViewMode, setUnifiedViewMode] = useState<UnifiedViewMode>('home');
 
-  // Matches view state
-  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
-  const [expandedScrollOffset, setExpandedScrollOffset] = useState(0);
-  const [expandedSelectedMatch, setExpandedSelectedMatch] = useState(0);
+  // Layout calculations
+  const headerHeight = 3;
+  const footerHeight = 2;
+  const rowHeight = 3;
+  const availableHeight = height - headerHeight - footerHeight;
+  const visibleCount = Math.max(1, Math.floor(availableHeight / rowHeight));
 
-  // Conversation view state
-  const [combinedMessages, setCombinedMessages] = useState<CombinedMessage[]>([]);
-  const [messageIndexMap, setMessageIndexMap] = useState<Map<number, number>>(new Map());
-  const [conversationFiles, setConversationFiles] = useState<ConversationFile[]>([]);
-  const [conversationMessageFiles, setConversationMessageFiles] = useState<MessageFile[]>([]);
-  const [conversationScrollOffset, setConversationScrollOffset] = useState(0);
-  const [highlightMessageIndex, setHighlightMessageIndex] = useState<number | undefined>(undefined);
-  const [selectedMessageIndex, setSelectedMessageIndex] = useState(0);
-
-  // Message detail view state
-  const [messageScrollOffset, setMessageScrollOffset] = useState(0);
-
-  // Initialize database and run background sync
-  useEffect(() => {
-    let cancelled = false;
-
-    const init = async () => {
-      await connect();
-      if (cancelled) return;
-      setDbReady(true);
-
-      // Get initial count (fast)
-      const initial = await conversationRepo.list({ limit: 1 });
-      const count = initial.length > 0 ? await conversationRepo.count() : 0;
-      if (!cancelled) {
-        setConversationCount(count);
-      }
-
-      // Quick check if sync is needed (fast - just checks mtimes)
-      const syncNeeded = await needsSync();
-      if (cancelled) return;
-
-      if (!syncNeeded) {
-        // Nothing to sync - show "Synced" immediately
-        setSyncStatus({ phase: 'done', newConversations: 0 });
-        return;
-      }
-
-      // Run background sync only if needed
-      setSyncStatus({ phase: 'syncing', message: 'Syncing...' });
-      try {
-        let initialCount = count;
-        await runSync({ force: false }, (progress: SyncProgress) => {
-          if (cancelled) return;
-          if (progress.phase === 'done') {
-            conversationRepo.count().then((newCount) => {
-              if (!cancelled) {
-                const diff = Math.max(0, newCount - initialCount);
-                setConversationCount(newCount);
-                setSyncStatus({
-                  phase: 'done',
-                  newConversations: diff,
-                });
-              }
-            });
-          } else if (progress.phase === 'error') {
-            if (!cancelled) {
-              setSyncStatus({
-                phase: 'error',
-                message: progress.error || 'Sync failed',
-              });
-            }
-          }
-        });
-      } catch (err) {
-        if (!cancelled) {
-          setSyncStatus({
-            phase: 'error',
-            message: err instanceof Error ? err.message : 'Sync failed',
-          });
-        }
-      }
-    };
-
-    init();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Load conversations when entering list view
-  useEffect(() => {
-    if (viewMode === 'list' && dbReady && conversations.length === 0) {
-      conversationRepo.list({ limit: 100 }).then(setConversations);
-    }
-  }, [viewMode, dbReady, conversations.length]);
-
-  // Execute search
-  const executeSearch = useCallback(async (query: string) => {
-    if (!query.trim()) return;
-
-    try {
-      const results = await search(query, 50);
-      setSearchResults(results);
-      setViewMode('search');
-      setSelectedIndex(0);
-    } catch (err) {
-      // Search failed - stay on home
-    }
-  }, []);
-
-  // Load files and messages when expanding a conversation
-  useEffect(() => {
-    if (expandedIndex !== null) {
-      let conv: Conversation | undefined;
-
-      // Check search results first
-      if (searchResults && searchResults.results[expandedIndex]) {
-        conv = searchResults.results[expandedIndex]?.conversation;
-      } else if (conversations[expandedIndex]) {
-        // Fall back to conversations list
-        conv = conversations[expandedIndex];
-      }
-
-      if (conv) {
-        filesRepo.findByConversation(conv.id).then(setConversationFiles);
-        messageFilesRepo.findByConversation(conv.id).then(setConversationMessageFiles);
-        messageRepo.findByConversation(conv.id).then((msgs) => {
-          const { messages: combined, indexMap } = combineConsecutiveMessages(msgs);
-          setCombinedMessages(combined);
-          setMessageIndexMap(indexMap);
-        });
-      }
-    } else {
-      setConversationFiles([]);
-      setConversationMessageFiles([]);
-      setCombinedMessages([]);
-      setMessageIndexMap(new Map());
-    }
-  }, [expandedIndex, searchResults, conversations]);
-
-  // Display items for list/search views
-  // Note: We compute this independently of viewMode so that expandedResult
-  // remains valid when transitioning from list/search to conversation view
-  const displayItems = useMemo((): ConversationResult[] => {
-    // If we have search results, use those
+  // Convert data to display items
+  const displayItems: ConversationResult[] = useMemo(() => {
     if (searchResults) {
       return searchResults.results;
     }
-    // Otherwise, use the conversations list (for recent/list view)
     if (conversations.length > 0) {
       return conversations.map((conv) => ({
         conversation: conv,
@@ -397,91 +238,44 @@ function UnifiedApp() {
     return [];
   }, [searchResults, conversations]);
 
-  const expandedResult = expandedIndex !== null ? displayItems[expandedIndex] : null;
+  // Determine if we're in a navigation view
+  const isInNavigationView = unifiedViewMode !== 'home' && unifiedViewMode !== 'stats';
 
-  // Layout calculations - each row is 2 lines content + 1 line separator = 3 lines
-  const headerHeight = 3;
-  const footerHeight = 2;
-  const rowHeight = 3; // 2 lines content + 1 line separator
-  const availableHeight = height - headerHeight - footerHeight;
-  const visibleCount = Math.max(1, Math.floor(availableHeight / rowHeight));
+  // Navigation hook
+  const { state: navState, actions: navActions, expandedResult, handleNavigationInput } = useNavigation({
+    displayItems,
+    availableHeight,
+    width,
+    hasSearchResults: !!searchResults,
+    onExitList: () => {
+      setUnifiedViewMode('home');
+      setSearchQuery('');
+      setSearchResults(null);
+    },
+  });
 
-  const scrollOffset = useMemo(() => {
-    const maxOffset = Math.max(0, displayItems.length - visibleCount);
-    if (selectedIndex < visibleCount) return 0;
-    return Math.min(selectedIndex - visibleCount + 1, maxOffset);
-  }, [selectedIndex, visibleCount, displayItems.length]);
-
-  const visibleItems = useMemo(() => {
-    return displayItems.slice(scrollOffset, scrollOffset + visibleCount);
-  }, [displayItems, scrollOffset, visibleCount]);
-
-  // Map a match to its combined message index
-  const getCombinedIndexForMatch = (match: { messageIndex: number } | undefined): number | null => {
-    if (!match) return null;
-    return messageIndexMap.get(match.messageIndex) ?? match.messageIndex;
-  };
-
-  // Find the next/previous distinct match
-  const findNextDistinctMatch = (startIdx: number, direction: 1 | -1): number => {
-    if (!expandedResult) return startIdx;
-    const matches = expandedResult.matches;
-    const currentCombined = getCombinedIndexForMatch(matches[startIdx]);
-
-    let i = startIdx + direction;
-    while (i >= 0 && i < matches.length) {
-      const combinedIdx = getCombinedIndexForMatch(matches[i]);
-      if (combinedIdx !== currentCombined) {
-        return i;
+  // Sync navigation hook's view mode with unified view mode
+  useEffect(() => {
+    if (isInNavigationView) {
+      // Keep unified view mode in sync with navigation state
+      if (navState.viewMode !== unifiedViewMode) {
+        setUnifiedViewMode(navState.viewMode);
       }
-      i += direction;
     }
-
-    return startIdx;
-  };
-
-  // Load conversation for full view
-  const loadConversation = async (conversationId: string, targetMessageIndex?: number) => {
-    const msgs = await messageRepo.findByConversation(conversationId);
-    const { messages: combined, indexMap } = combineConsecutiveMessages(msgs);
-    setCombinedMessages(combined);
-    setMessageIndexMap(indexMap);
-
-    const headerH = 5 + (conversationFiles.length > 0 ? 1 : 0);
-    const messagesPerPage = Math.max(1, Math.floor((availableHeight - headerH) / 3));
-
-    if (targetMessageIndex !== undefined) {
-      const combinedIdx = indexMap.get(targetMessageIndex) ?? 0;
-      const targetScroll = Math.max(0, combinedIdx - Math.floor(messagesPerPage / 2));
-      const maxScrollOffset = Math.max(0, combined.length - messagesPerPage);
-      setConversationScrollOffset(Math.min(targetScroll, maxScrollOffset));
-      setHighlightMessageIndex(combinedIdx);
-      setSelectedMessageIndex(combinedIdx);
-    } else {
-      setConversationScrollOffset(0);
-      setHighlightMessageIndex(undefined);
-      setSelectedMessageIndex(0);
-    }
-  };
-
-  // Go to list view
-  const goToList = useCallback(() => {
-    setViewMode('list');
-    setSelectedIndex(0);
-  }, []);
+  }, [navState.viewMode, isInNavigationView, unifiedViewMode]);
 
   // Get current conversation for export
   const getCurrentConversation = useCallback((): Conversation[] => {
-    if (viewMode === 'conversation' || viewMode === 'message' || viewMode === 'matches') {
+    if (navState.viewMode === 'conversation' || navState.viewMode === 'message' || navState.viewMode === 'matches') {
       const conv = expandedResult?.conversation;
       return conv ? [conv] : [];
     }
-    if (viewMode === 'list' || viewMode === 'search') {
-      const conv = displayItems[selectedIndex]?.conversation;
+    if (navState.viewMode === 'list') {
+      const conv = displayItems[navState.selectedIndex]?.conversation;
       return conv ? [conv] : [];
     }
     return [];
-  }, [viewMode, expandedResult, displayItems, selectedIndex]);
+  }, [navState.viewMode, expandedResult, displayItems, navState.selectedIndex]);
 
   // Export hook
   const {
@@ -494,23 +288,119 @@ function UnifiedApp() {
     handleExportInput,
   } = useExport({ getConversations: getCurrentConversation });
 
+  // Initialize database and run background sync
+  useEffect(() => {
+    let cancelled = false;
+    let initialCount = 0;
+
+    const initDb = async () => {
+      await connect();
+      if (cancelled) return;
+      setDbReady(true);
+
+      const initial = await conversationRepo.list({ limit: 1 });
+      initialCount = initial.length > 0 ? await conversationRepo.count() : 0;
+      if (!cancelled) setConversationCount(initialCount);
+    };
+
+    const startBackgroundSync = () => {
+      setSyncStatus({ phase: 'syncing', message: 'Syncing...' });
+      runSync({ force: false }, (progress: SyncProgress) => {
+        if (cancelled) return;
+        if (progress.phase === 'done') {
+          conversationRepo.count().then((newCount) => {
+            if (!cancelled) {
+              const diff = Math.max(0, newCount - initialCount);
+              setConversationCount(newCount);
+              setSyncStatus({ phase: 'done', newConversations: diff });
+            }
+          });
+        } else if (progress.phase === 'error') {
+          if (!cancelled) {
+            setSyncStatus({ phase: 'error', message: progress.error || 'Sync failed' });
+          }
+        }
+      }).catch((err) => {
+        if (!cancelled) {
+          setSyncStatus({ phase: 'error', message: err instanceof Error ? err.message : 'Sync failed' });
+        }
+      });
+    };
+
+    setTimeout(() => {
+      if (cancelled) return;
+      initDb().then(() => {
+        if (!cancelled) startBackgroundSync();
+      });
+    }, 0);
+
+    return () => { cancelled = true; };
+  }, []);
+
+  // Load conversations when entering list view
+  useEffect(() => {
+    if (unifiedViewMode === 'list' && dbReady && conversations.length === 0 && !searchResults) {
+      conversationRepo.list({ limit: 100 }).then(setConversations);
+    }
+  }, [unifiedViewMode, dbReady, conversations.length, searchResults]);
+
+  // Execute search
+  const executeSearch = useCallback(async (query: string) => {
+    if (!query.trim()) return;
+    try {
+      const results = await search(query, 50);
+      setSearchResults(results);
+      setUnifiedViewMode('list');
+      navActions.setSelectedIndex(0);
+      navActions.setViewMode('list');
+    } catch {
+      // Search failed - stay on home
+    }
+  }, [navActions]);
+
+  // Go to list view
+  const goToList = useCallback(() => {
+    setUnifiedViewMode('list');
+    navActions.setViewMode('list');
+    navActions.setSelectedIndex(0);
+  }, [navActions]);
+
+  // Scroll offset for list view
+  const scrollOffset = useMemo(() => {
+    const maxOffset = Math.max(0, displayItems.length - visibleCount);
+    if (navState.selectedIndex < visibleCount) return 0;
+    return Math.min(navState.selectedIndex - visibleCount + 1, maxOffset);
+  }, [navState.selectedIndex, visibleCount, displayItems.length]);
+
+  const visibleItems = useMemo(() => {
+    return displayItems.slice(scrollOffset, scrollOffset + visibleCount);
+  }, [displayItems, scrollOffset, visibleCount]);
+
+  // Show scroll indicator
+  const totalItems = displayItems.length;
+  const showingFrom = scrollOffset + 1;
+  const showingTo = Math.min(scrollOffset + visibleCount, totalItems);
+  const scrollIndicator = totalItems > visibleCount ? ` (${showingFrom}-${showingTo} of ${totalItems})` : '';
+
+  // Get current query for display
+  const activeQuery = searchResults ? searchQuery : '';
+
   useInput((input, key) => {
     // Handle export menu first
     if (handleExportInput(input, key)) {
       return;
     }
-    // Quit from home/list/search
-    if (input === 'q' && (viewMode === 'home' || viewMode === 'list' || viewMode === 'search')) {
+
+    // Quit from home/list (but not from deeper views)
+    if (input === 'q' && (unifiedViewMode === 'home' || unifiedViewMode === 'list')) {
       exit();
       return;
     }
 
     // Home view input handling
-    if (viewMode === 'home') {
+    if (unifiedViewMode === 'home') {
       if (key.escape) {
-        if (searchQuery) {
-          setSearchQuery('');
-        }
+        if (searchQuery) setSearchQuery('');
         return;
       }
       if (key.tab) {
@@ -521,7 +411,6 @@ function UnifiedApp() {
         if (searchQuery.trim()) {
           executeSearch(searchQuery);
         } else {
-          // Empty enter = show recent
           goToList();
         }
         return;
@@ -530,12 +419,10 @@ function UnifiedApp() {
         setSearchQuery((q) => q.slice(0, -1));
         return;
       }
-      // Ctrl+s to open stats dashboard
       if (input === 's' && key.ctrl) {
-        setViewMode('stats');
+        setUnifiedViewMode('stats');
         return;
       }
-      // Type to search (any character, including 'r')
       if (input && input.length === 1 && !key.ctrl && !key.meta) {
         setSearchQuery((q) => q + input);
         return;
@@ -543,189 +430,41 @@ function UnifiedApp() {
       return;
     }
 
-    // Back to home from list/search
-    if ((viewMode === 'list' || viewMode === 'search') && key.escape) {
-      setViewMode('home');
-      setSearchQuery('');
-      setSearchResults(null);
-      setSelectedIndex(0);
-      return;
-    }
-
-    // Message detail view navigation
-    // j/k navigate between messages, arrow keys scroll within message
-    if (viewMode === 'message' && combinedMessages.length > 0) {
-      const currentMessage = combinedMessages[selectedMessageIndex];
-      // Export trigger
-      if (input === 'e') {
-        openExportMenu();
-        return;
-      }
-      if (key.escape || key.backspace || key.delete) {
-        setViewMode('conversation');
-        setMessageScrollOffset(0);
-      } else if (input === 'j') {
-        // j = next message
-        if (selectedMessageIndex < combinedMessages.length - 1) {
-          setSelectedMessageIndex((i) => i + 1);
-          setMessageScrollOffset(0);
-        }
-      } else if (input === 'k') {
-        // k = previous message
-        if (selectedMessageIndex > 0) {
-          setSelectedMessageIndex((i) => i - 1);
-          setMessageScrollOffset(0);
-        }
-      } else if (key.downArrow) {
-        // Down arrow = scroll within message
-        // Use rendered line count and match MessageDetailView's visible height calculation
-        // MessageDetailView receives availableHeight and subtracts headerHeight=3 for visible lines
-        const lineCount = currentMessage ? getRenderedLineCount(currentMessage.content, width) : 0;
-        const visibleLines = availableHeight - 3; // matches MessageDetailView
-        const maxOffset = Math.max(0, lineCount - visibleLines);
-        setMessageScrollOffset((o) => Math.min(o + 1, maxOffset));
-      } else if (key.upArrow) {
-        // Up arrow = scroll within message
-        setMessageScrollOffset((o) => Math.max(o - 1, 0));
-      } else if (input === 'g') {
-        setMessageScrollOffset(0);
-      } else if (input === 'G') {
-        const lineCount = currentMessage ? getRenderedLineCount(currentMessage.content, width) : 0;
-        const visibleLines = availableHeight - 3;
-        setMessageScrollOffset(Math.max(0, lineCount - visibleLines));
+    // Stats view - back to home
+    if (unifiedViewMode === 'stats') {
+      if (key.escape || input === 'q') {
+        setUnifiedViewMode('home');
       }
       return;
     }
 
-    // Conversation view navigation
-    if (viewMode === 'conversation' && expandedResult) {
-      const headerH = 5 + (conversationFiles.length > 0 ? 1 : 0);
-      const messagesPerPage = Math.max(1, Math.floor((availableHeight - headerH) / 3));
-      const maxScrollOffset = Math.max(0, combinedMessages.length - messagesPerPage);
-
-      // Export trigger
-      if (input === 'e') {
-        openExportMenu();
-        return;
-      }
-      if (key.escape || key.backspace || key.delete) {
-        if (searchResults && expandedResult.matches.length > 0) {
-          setViewMode('matches');
-        } else {
-          setViewMode(searchResults ? 'search' : 'list');
-          setExpandedIndex(null);
-        }
-        setCombinedMessages([]);
-        setMessageIndexMap(new Map());
-        setHighlightMessageIndex(undefined);
-        setSelectedMessageIndex(0);
-      } else if (input === 'j' || key.downArrow) {
-        const newIdx = Math.min(selectedMessageIndex + 1, combinedMessages.length - 1);
-        setSelectedMessageIndex(newIdx);
-        if (newIdx >= conversationScrollOffset + messagesPerPage) {
-          setConversationScrollOffset(Math.min(newIdx - messagesPerPage + 1, maxScrollOffset));
-        }
-      } else if (input === 'k' || key.upArrow) {
-        const newIdx = Math.max(selectedMessageIndex - 1, 0);
-        setSelectedMessageIndex(newIdx);
-        if (newIdx < conversationScrollOffset) {
-          setConversationScrollOffset(newIdx);
-        }
-      } else if (input === 'g') {
-        setConversationScrollOffset(0);
-        setSelectedMessageIndex(0);
-      } else if (input === 'G') {
-        setConversationScrollOffset(maxScrollOffset);
-        setSelectedMessageIndex(combinedMessages.length - 1);
-      } else if (key.return) {
-        setViewMode('message');
-        setMessageScrollOffset(0);
-      }
+    // Export trigger - works in ALL navigation views
+    if (input === 'e' && isInNavigationView) {
+      openExportMenu();
       return;
     }
 
-    // Matches view navigation
-    if (viewMode === 'matches' && expandedResult) {
-      // Export trigger
-      if (input === 'e') {
-        openExportMenu();
-        return;
-      }
-      if (key.escape || key.backspace || key.delete) {
-        setViewMode('search');
-        setExpandedIndex(null);
-        setExpandedScrollOffset(0);
-        setExpandedSelectedMatch(0);
-      } else if (input === 'j' || key.downArrow) {
-        const maxIdx = expandedResult.matches.length - 1;
-        setExpandedSelectedMatch((i) => {
-          const newIdx = Math.min(findNextDistinctMatch(i, 1), maxIdx);
-          const matchesPerPage = Math.max(1, Math.floor((height - 8) / 4));
-          const maxOffset = Math.max(0, expandedResult.matches.length - matchesPerPage);
-          let offset = expandedScrollOffset;
-          if (newIdx >= offset + matchesPerPage) {
-            offset = newIdx - matchesPerPage + 1;
-          }
-          setExpandedScrollOffset(Math.min(Math.max(offset, 0), maxOffset));
-          return newIdx;
-        });
-      } else if (input === 'k' || key.upArrow) {
-        setExpandedSelectedMatch((i) => {
-          const newIdx = Math.max(findNextDistinctMatch(i, -1), 0);
-          const matchesPerPage = Math.max(1, Math.floor((height - 8) / 4));
-          let offset = expandedScrollOffset;
-          if (newIdx < offset) {
-            offset = newIdx;
-          }
-          setExpandedScrollOffset(Math.max(offset, 0));
-          return newIdx;
-        });
-      } else if (key.return) {
-        const selectedMatch = expandedResult.matches[expandedSelectedMatch];
-        if (selectedMatch) {
-          setViewMode('conversation');
-          loadConversation(expandedResult.conversation.id, selectedMatch.messageIndex);
-        }
-      }
-      return;
-    }
-
-    // List/Search view navigation
-    if (viewMode === 'list' || viewMode === 'search') {
-      if (displayItems.length === 0) return;
-
-      // Export trigger
-      if (input === 'e') {
-        openExportMenu();
+    // Navigation views - use shared hook
+    if (isInNavigationView) {
+      // Handle back from list specially to go to home
+      if ((key.escape || key.backspace || key.delete) && navState.viewMode === 'list') {
+        setUnifiedViewMode('home');
+        setSearchQuery('');
+        setSearchResults(null);
+        navActions.resetNavigation();
         return;
       }
 
-      if (input === 'j' || key.downArrow) {
-        setSelectedIndex((i) => Math.min(i + 1, displayItems.length - 1));
-      } else if (input === 'k' || key.upArrow) {
-        setSelectedIndex((i) => Math.max(i - 1, 0));
-      } else if (key.return) {
-        const item = displayItems[selectedIndex];
-        if (item) {
-          if (viewMode === 'search' && item.matches.length > 0) {
-            // Search result with matches - show matches view
-            setViewMode('matches');
-            setExpandedIndex(selectedIndex);
-            setExpandedScrollOffset(0);
-            setExpandedSelectedMatch(0);
-          } else {
-            // List item or search result without matches - go directly to conversation
-            setViewMode('conversation');
-            setExpandedIndex(selectedIndex);
-            loadConversation(item.conversation.id);
-          }
-        }
+      if (handleNavigationInput(input, key)) {
+        // Update unified view mode to match navigation state
+        setUnifiedViewMode(navState.viewMode);
+        return;
       }
     }
   });
 
   // Home screen
-  if (viewMode === 'home') {
+  if (unifiedViewMode === 'home') {
     return (
       <HomeScreen
         width={width}
@@ -738,25 +477,16 @@ function UnifiedApp() {
   }
 
   // Stats dashboard
-  if (viewMode === 'stats') {
+  if (unifiedViewMode === 'stats') {
     return (
       <StatsContent
         width={width}
         height={height}
         period={30}
-        onBack={() => setViewMode('home')}
+        onBack={() => setUnifiedViewMode('home')}
       />
     );
   }
-
-  // Get current query for display
-  const activeQuery = viewMode === 'search' && searchResults ? searchQuery : '';
-
-  // Show scroll indicator
-  const totalItems = displayItems.length;
-  const showingFrom = scrollOffset + 1;
-  const showingTo = Math.min(scrollOffset + visibleCount, totalItems);
-  const scrollIndicator = totalItems > visibleCount ? ` (${showingFrom}-${showingTo} of ${totalItems})` : '';
 
   return (
     <Box width={width} height={height} flexDirection="column">
@@ -764,11 +494,11 @@ function UnifiedApp() {
       <Box flexDirection="column" marginBottom={1}>
         <Box paddingX={1}>
           <Text bold color="cyan">dex</Text>
-          {viewMode === 'search' ? (
+          {searchResults ? (
             <>
               <Text color="gray"> / </Text>
               <Text color="white">{searchQuery}</Text>
-              <Text color="gray"> — {searchResults?.totalConversations ?? 0} results{scrollIndicator}</Text>
+              <Text color="gray"> — {searchResults.totalConversations} results{scrollIndicator}</Text>
             </>
           ) : (
             <>
@@ -787,47 +517,47 @@ function UnifiedApp() {
         {displayItems.length === 0 ? (
           <Box flexDirection="column" alignItems="center" justifyContent="center" height={availableHeight}>
             <Text color="gray">
-              {viewMode === 'search' ? 'No results found.' : 'No conversations yet.'}
+              {searchResults ? 'No results found.' : 'No conversations yet.'}
             </Text>
-            {viewMode === 'list' && (
+            {!searchResults && (
               <Text color="gray">Run `dex sync` to index your conversations.</Text>
             )}
           </Box>
-        ) : viewMode === 'message' && combinedMessages[selectedMessageIndex] ? (
+        ) : navState.viewMode === 'message' && navState.combinedMessages[navState.selectedMessageIndex] ? (
           <MessageDetailView
-            message={combinedMessages[selectedMessageIndex]!}
-            messageFiles={conversationMessageFiles}
+            message={navState.combinedMessages[navState.selectedMessageIndex]!}
+            messageFiles={navState.conversationMessageFiles}
             width={width - 2}
             height={availableHeight}
-            scrollOffset={messageScrollOffset}
+            scrollOffset={navState.messageScrollOffset}
             query={activeQuery}
           />
-        ) : viewMode === 'conversation' && expandedResult ? (
+        ) : navState.viewMode === 'conversation' && expandedResult ? (
           <ConversationView
             conversation={expandedResult.conversation}
-            messages={combinedMessages}
-            files={conversationFiles}
-            messageFiles={conversationMessageFiles}
+            messages={navState.combinedMessages}
+            files={navState.conversationFiles}
+            messageFiles={navState.conversationMessageFiles}
             width={width - 2}
             height={availableHeight}
-            scrollOffset={conversationScrollOffset}
-            highlightMessageIndex={highlightMessageIndex}
-            selectedIndex={selectedMessageIndex}
+            scrollOffset={navState.conversationScrollOffset}
+            highlightMessageIndex={navState.highlightMessageIndex}
+            selectedIndex={navState.selectedMessageIndex}
           />
-        ) : viewMode === 'matches' && expandedResult ? (
+        ) : navState.viewMode === 'matches' && expandedResult ? (
           <MatchesView
             result={expandedResult}
-            files={conversationFiles}
-            messageFiles={conversationMessageFiles}
+            files={navState.conversationFiles}
+            messageFiles={navState.conversationMessageFiles}
             width={width - 2}
             height={availableHeight}
-            scrollOffset={expandedScrollOffset}
-            selectedMatchIndex={expandedSelectedMatch}
+            scrollOffset={navState.expandedScrollOffset}
+            selectedMatchIndex={navState.expandedSelectedMatch}
             query={activeQuery}
-            indexMap={messageIndexMap}
-            combinedMessageCount={combinedMessages.length}
+            indexMap={navState.messageIndexMap}
+            combinedMessageCount={navState.combinedMessages.length}
           />
-        ) : viewMode === 'search' ? (
+        ) : searchResults ? (
           // Search results view
           visibleItems.map((item, idx) => {
             const actualIndex = scrollOffset + idx;
@@ -836,14 +566,14 @@ function UnifiedApp() {
               <ResultRow
                 key={item.conversation.id}
                 result={item}
-                isSelected={actualIndex === selectedIndex}
+                isSelected={actualIndex === navState.selectedIndex}
                 width={width - 2}
                 query={activeQuery}
               />
             );
           })
         ) : (
-          // List view - using new consistent component with separators
+          // Recent conversations list
           visibleItems.map((item, idx) => {
             const actualIndex = scrollOffset + idx;
             if (!item?.conversation) return null;
@@ -852,12 +582,10 @@ function UnifiedApp() {
               <Box key={item.conversation.id} flexDirection="column">
                 <ConversationListItem
                   conversation={item.conversation}
-                  isSelected={actualIndex === selectedIndex}
+                  isSelected={actualIndex === navState.selectedIndex}
                   width={width - 2}
                 />
-                {!isLast && (
-                  <Box height={1} />
-                )}
+                {!isLast && <Box height={1} />}
               </Box>
             );
           })
@@ -871,7 +599,7 @@ function UnifiedApp() {
         </Box>
         <Box paddingX={1}>
           <Text color="gray">
-            {viewMode === 'list' || viewMode === 'search' ? (
+            {navState.viewMode === 'list' ? (
               <>
                 <Text color="white" bold>e</Text>
                 <Text color="gray"> export · </Text>
@@ -886,7 +614,7 @@ function UnifiedApp() {
                 <Text color="white" bold>q</Text>
                 <Text color="gray"> quit</Text>
               </>
-            ) : viewMode === 'conversation' ? (
+            ) : navState.viewMode === 'conversation' ? (
               <>
                 <Text color="white" bold>e</Text>
                 <Text color="gray"> export · </Text>
@@ -899,22 +627,22 @@ function UnifiedApp() {
                 <Text color="white" bold>Esc</Text>
                 <Text color="gray"> back</Text>
               </>
-            ) : viewMode === 'message' ? (
+            ) : navState.viewMode === 'message' ? (
               <>
                 <Text color="white" bold>e</Text>
                 <Text color="gray"> export · </Text>
                 <Text color="white" bold>j</Text>
                 <Text color="gray">/</Text>
                 <Text color="white" bold>k</Text>
-                <Text color="gray"> nav · </Text>
-                <Text color="white" bold>↑</Text>
-                <Text color="gray">/</Text>
-                <Text color="white" bold>↓</Text>
                 <Text color="gray"> scroll · </Text>
+                <Text color="white" bold>n</Text>
+                <Text color="gray">/</Text>
+                <Text color="white" bold>p</Text>
+                <Text color="gray"> nav · </Text>
                 <Text color="white" bold>Esc</Text>
                 <Text color="gray"> back</Text>
               </>
-            ) : viewMode === 'matches' ? (
+            ) : navState.viewMode === 'matches' ? (
               <>
                 <Text color="white" bold>e</Text>
                 <Text color="gray"> export · </Text>

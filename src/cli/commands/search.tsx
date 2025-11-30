@@ -16,9 +16,6 @@ import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index';
 import {
   search,
-  messageRepo,
-  filesRepo,
-  messageFilesRepo,
   searchByFilePath,
   getFileMatchesForConversations,
   conversationRepo,
@@ -32,28 +29,19 @@ import {
   ExportActionMenu,
   StatusToast,
 } from '../components/index';
+import { useNavigation, useExport } from '../hooks/index';
 import {
   formatRelativeTime,
   formatSourceLabel,
   formatConversationCount,
   formatMessageCount,
-  combineConsecutiveMessages,
-  getRenderedLineCount,
-  type CombinedMessage,
 } from '../../utils/format';
-import {
-  exportConversationsToFile,
-  exportConversationsToClipboard,
-} from '../../utils/export-actions';
-import { type SearchResponse, type ConversationFile, type MessageFile, type Conversation, type SourceType } from '../../schema/index';
+import { type SearchResponse, type Conversation, type ConversationResult } from '../../schema/index';
 
 interface SearchOptions {
   limit?: string;
   file?: string;
 }
-
-type ViewMode = 'list' | 'matches' | 'conversation' | 'message';
-type ExportMode = 'none' | 'action-menu';
 
 function SearchApp({
   query,
@@ -73,38 +61,62 @@ function SearchApp({
   const [response, setResponse] = useState<SearchResponse | null>(null);
   const [fileMatches, setFileMatches] = useState<Map<string, FileSearchMatch[]>>(new Map());
 
-  // Navigation state
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
-  const [expandedScrollOffset, setExpandedScrollOffset] = useState(0);
-  const [expandedSelectedMatch, setExpandedSelectedMatch] = useState(0);
-
-  // Conversation view state
-  const [combinedMessages, setCombinedMessages] = useState<CombinedMessage[]>([]);
-  const [messageIndexMap, setMessageIndexMap] = useState<Map<number, number>>(new Map());
-  const [conversationFiles, setConversationFiles] = useState<ConversationFile[]>([]);
-  const [conversationMessageFiles, setConversationMessageFiles] = useState<MessageFile[]>([]);
-  const [conversationScrollOffset, setConversationScrollOffset] = useState(0);
-  const [highlightMessageIndex, setHighlightMessageIndex] = useState<number | undefined>(undefined);
-  const [selectedMessageIndex, setSelectedMessageIndex] = useState(0);
-
-  // Message detail view state
-  const [messageScrollOffset, setMessageScrollOffset] = useState(0);
-
   // Multi-select state (only in list view)
   const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // Export state
-  const [exportMode, setExportMode] = useState<ExportMode>('none');
-  const [exportActionIndex, setExportActionIndex] = useState(0);
+  // Layout calculations
+  const headerHeight = 3;
+  const footerHeight = 2;
+  const rowHeight = 4;
+  const availableHeight = height - headerHeight - footerHeight;
+  const visibleCount = Math.max(1, Math.floor(availableHeight / rowHeight));
 
-  // Status toast
-  const [statusMessage, setStatusMessage] = useState('');
-  const [statusType, setStatusType] = useState<'success' | 'error'>('success');
-  const [statusVisible, setStatusVisible] = useState(false);
+  // Convert search results to display items
+  const displayItems: ConversationResult[] = useMemo(() => {
+    if (!response) return [];
+    return response.results;
+  }, [response]);
 
+  // Navigation hook
+  const { state: navState, actions: navActions, expandedResult, handleNavigationInput } = useNavigation({
+    displayItems,
+    availableHeight,
+    width,
+    hasSearchResults: true,
+    onExitList: undefined, // No back from list in search command
+  });
+
+  // Get conversations for export
+  const getConversationsToExport = useCallback((): Conversation[] => {
+    if (multiSelectMode && selectedIds.size > 0 && response) {
+      return response.results
+        .filter((r) => selectedIds.has(r.conversation.id))
+        .map((r) => r.conversation);
+    }
+    // Single conversation export based on view
+    if (navState.viewMode === 'list' && response) {
+      const conv = response.results[navState.selectedIndex]?.conversation;
+      return conv ? [conv] : [];
+    }
+    if (expandedResult) {
+      return [expandedResult.conversation];
+    }
+    return [];
+  }, [multiSelectMode, selectedIds, response, navState.viewMode, navState.selectedIndex, expandedResult]);
+
+  // Export hook
+  const {
+    exportMode,
+    exportActionIndex,
+    statusMessage,
+    statusType,
+    statusVisible,
+    openExportMenu,
+    handleExportInput,
+  } = useExport({ getConversations: getConversationsToExport });
+
+  // Run search on mount
   useEffect(() => {
     async function runSearch() {
       try {
@@ -112,10 +124,8 @@ function SearchApp({
         const startTime = Date.now();
 
         if (filePattern && !query) {
-          // File-only search: find conversations by file path
+          // File-only search
           const fileResults = await searchByFilePath(filePattern, limit);
-
-          // Group by conversation and get unique conversation IDs
           const convIdToMatches = new Map<string, FileSearchMatch[]>();
           for (const match of fileResults) {
             const existing = convIdToMatches.get(match.conversationId) ?? [];
@@ -123,21 +133,18 @@ function SearchApp({
             convIdToMatches.set(match.conversationId, existing);
           }
 
-          // Fetch conversation metadata
           const conversations = await Promise.all(
             Array.from(convIdToMatches.keys()).map((id) => conversationRepo.findById(id))
           );
 
-          // Build search response with file-based results
           const results = conversations
             .filter((conv): conv is NonNullable<typeof conv> => conv !== null)
             .map((conv) => {
               const matches = convIdToMatches.get(conv.id) ?? [];
-              // Calculate score from file matches (sum of file scores)
               const fileScore = matches.reduce((sum, m) => sum + m.score, 0);
               return {
                 conversation: conv,
-                matches: [], // No message matches for file-only search
+                matches: [],
                 bestMatch: {
                   messageId: '',
                   conversationId: conv.id,
@@ -162,28 +169,19 @@ function SearchApp({
           });
           setFileMatches(convIdToMatches);
         } else if (filePattern && query) {
-          // Combined search: search messages, then filter/enrich by file matches
-          const result = await search(query, limit * 2); // Get more to filter
-
-          // Get file matches for the result conversations
+          // Combined search
+          const result = await search(query, limit * 2);
           const convIds = new Set(result.results.map((r) => r.conversation.id));
           const fileMatchMap = await getFileMatchesForConversations(convIds, filePattern);
 
-          // Filter to only conversations with file matches, boost scores
           const filteredResults = result.results
-            .filter((r) => {
-              const matches = fileMatchMap.get(r.conversation.id) ?? [];
-              return matches.length > 0;
-            })
+            .filter((r) => (fileMatchMap.get(r.conversation.id) ?? []).length > 0)
             .map((r) => {
               const matches = fileMatchMap.get(r.conversation.id) ?? [];
               const fileBoost = matches.reduce((sum, m) => sum + m.score * 0.5, 0);
               return {
                 ...r,
-                bestMatch: {
-                  ...r.bestMatch,
-                  score: r.bestMatch.score + fileBoost,
-                },
+                bestMatch: { ...r.bestMatch, score: r.bestMatch.score + fileBoost },
               };
             })
             .sort((a, b) => b.bestMatch.score - a.bestMatch.score)
@@ -197,7 +195,7 @@ function SearchApp({
           });
           setFileMatches(fileMatchMap);
         } else {
-          // Standard message search
+          // Standard search
           const result = await search(query, limit);
           setResponse(result);
           setFileMatches(new Map());
@@ -211,156 +209,18 @@ function SearchApp({
     runSearch();
   }, [query, limit, filePattern]);
 
-  // Load files and compute combined messages when expanding a conversation
-  useEffect(() => {
-    if (expandedIndex !== null && response?.results[expandedIndex]) {
-      const convId = response.results[expandedIndex]!.conversation.id;
-      filesRepo.findByConversation(convId).then(setConversationFiles);
-      messageFilesRepo.findByConversation(convId).then(setConversationMessageFiles);
-      // Pre-compute combined messages for index mapping in matches view
-      messageRepo.findByConversation(convId).then((msgs) => {
-        const { messages: combined, indexMap } = combineConsecutiveMessages(msgs);
-        setCombinedMessages(combined);
-        setMessageIndexMap(indexMap);
-      });
-    } else {
-      setConversationFiles([]);
-      setConversationMessageFiles([]);
-      setCombinedMessages([]);
-      setMessageIndexMap(new Map());
-    }
-  }, [expandedIndex, response]);
-
-  const headerHeight = 3;
-  const footerHeight = 2;
-  const rowHeight = 4; // title + source + snippet + margin
-  const availableHeight = height - headerHeight - footerHeight;
-  const visibleCount = Math.max(1, Math.floor(availableHeight / rowHeight));
-
+  // Scroll offset for list view
   const scrollOffset = useMemo(() => {
     if (!response) return 0;
     const maxOffset = Math.max(0, response.results.length - visibleCount);
-    if (selectedIndex < visibleCount) return 0;
-    return Math.min(selectedIndex - visibleCount + 1, maxOffset);
-  }, [selectedIndex, visibleCount, response?.results.length]);
+    if (navState.selectedIndex < visibleCount) return 0;
+    return Math.min(navState.selectedIndex - visibleCount + 1, maxOffset);
+  }, [navState.selectedIndex, visibleCount, response?.results.length]);
 
   const visibleResults = useMemo(() => {
     if (!response) return [];
     return response.results.slice(scrollOffset, scrollOffset + visibleCount);
   }, [response, scrollOffset, visibleCount]);
-
-  const expandedResult = expandedIndex !== null ? response?.results[expandedIndex] : null;
-
-  // Map a match to its combined message index (fallback to original index)
-  const getCombinedIndexForMatch = (match: { messageIndex: number } | undefined): number | null => {
-    if (!match) return null;
-    return messageIndexMap.get(match.messageIndex) ?? match.messageIndex;
-  };
-
-  // Find the next/previous match that points to a different combined message
-  const findNextDistinctMatch = (startIdx: number, direction: 1 | -1): number => {
-    if (!expandedResult) return startIdx;
-    const matches = expandedResult.matches;
-    const currentCombined = getCombinedIndexForMatch(matches[startIdx]);
-
-    let i = startIdx + direction;
-    while (i >= 0 && i < matches.length) {
-      const combinedIdx = getCombinedIndexForMatch(matches[i]);
-      if (combinedIdx !== currentCombined) {
-        return i;
-      }
-      i += direction;
-    }
-
-    return startIdx;
-  };
-
-  // Load conversation messages when entering conversation view
-  const loadConversation = async (conversationId: string, targetMessageIndex?: number) => {
-    const msgs = await messageRepo.findByConversation(conversationId);
-    const { messages: combined, indexMap } = combineConsecutiveMessages(msgs);
-    setCombinedMessages(combined);
-    setMessageIndexMap(indexMap);
-
-    // Use same calculation as ConversationView component
-    // Note: conversationFiles may not be loaded yet, so use 6 as safe estimate (5 base + 1 for files)
-    const headerHeight = 6;
-    const messagesPerPage = Math.max(1, Math.floor((availableHeight - headerHeight) / 3));
-
-    // Scroll to show the highlighted message and select it
-    if (targetMessageIndex !== undefined) {
-      // Convert original messageIndex to combined index
-      const combinedIdx = indexMap.get(targetMessageIndex) ?? 0;
-      const targetScroll = Math.max(0, combinedIdx - Math.floor(messagesPerPage / 2));
-      const maxScrollOffset = Math.max(0, combined.length - messagesPerPage);
-      setConversationScrollOffset(Math.min(targetScroll, maxScrollOffset));
-      setHighlightMessageIndex(combinedIdx);
-      setSelectedMessageIndex(combinedIdx);
-    } else {
-      setConversationScrollOffset(0);
-      setHighlightMessageIndex(undefined);
-      setSelectedMessageIndex(0);
-    }
-  };
-
-  // Show status toast with auto-dismiss
-  const showStatus = useCallback((message: string, type: 'success' | 'error') => {
-    setStatusMessage(message);
-    setStatusType(type);
-    setStatusVisible(true);
-    setTimeout(() => setStatusVisible(false), 3000);
-  }, []);
-
-  // Get the current conversation for export (based on view mode)
-  const getCurrentConversation = useCallback((): Conversation | null => {
-    if (viewMode === 'list' && response) {
-      return response.results[selectedIndex]?.conversation ?? null;
-    }
-    if (expandedIndex !== null && response) {
-      return response.results[expandedIndex]?.conversation ?? null;
-    }
-    return null;
-  }, [viewMode, response, selectedIndex, expandedIndex]);
-
-  // Get conversations to export
-  const getConversationsToExport = useCallback((): Conversation[] => {
-    if (multiSelectMode && selectedIds.size > 0 && response) {
-      return response.results
-        .filter((r) => selectedIds.has(r.conversation.id))
-        .map((r) => r.conversation);
-    }
-    const current = getCurrentConversation();
-    return current ? [current] : [];
-  }, [multiSelectMode, selectedIds, response, getCurrentConversation]);
-
-  // Execute the selected export action
-  const executeExportAction = useCallback(async () => {
-    const toExport = getConversationsToExport();
-    if (toExport.length === 0) return;
-
-    try {
-      if (exportActionIndex === 0) {
-        // Export to file
-        const outputDir = await exportConversationsToFile(toExport);
-        showStatus(`Exported ${toExport.length} to ${outputDir}`, 'success');
-        setExportMode('none');
-        setExportActionIndex(0);
-        setMultiSelectMode(false);
-        setSelectedIds(new Set());
-      } else if (exportActionIndex === 1) {
-        // Copy to clipboard
-        await exportConversationsToClipboard(toExport);
-        showStatus(`Copied ${toExport.length} conversation(s)`, 'success');
-        setExportMode('none');
-        setExportActionIndex(0);
-        setMultiSelectMode(false);
-        setSelectedIds(new Set());
-      }
-    } catch (err) {
-      showStatus(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
-      setExportMode('none');
-    }
-  }, [getConversationsToExport, exportActionIndex, showStatus]);
 
   useInput((input, key) => {
     // Priority 1: Quit
@@ -369,200 +229,58 @@ function SearchApp({
       return;
     }
 
-    // Priority 2: Export action menu
-    if (exportMode === 'action-menu') {
-      if (input === 'j' || key.downArrow) {
-        setExportActionIndex((i) => Math.min(i + 1, 1)); // Only 2 options (0-1)
-      } else if (input === 'k' || key.upArrow) {
-        setExportActionIndex((i) => Math.max(i - 1, 0));
-      } else if (key.return) {
-        executeExportAction();
-      } else if (key.escape) {
-        setExportMode('none');
-        setExportActionIndex(0);
-      }
+    // Priority 2: Export menu handling
+    if (handleExportInput(input, key)) {
       return;
     }
 
     if (!response || response.results.length === 0) return;
 
-    // Priority 3: Export trigger - works in ALL view modes
-    // In multi-select mode, only allow when items are selected
+    // Priority 3: Export trigger (works in ALL view modes)
     if (input === 'e') {
       if (multiSelectMode) {
         if (selectedIds.size > 0) {
-          setExportMode('action-menu');
+          openExportMenu();
         }
-      } else if (getCurrentConversation()) {
-        setExportMode('action-menu');
+      } else if (getConversationsToExport().length > 0) {
+        openExportMenu();
       }
       return;
     }
 
-    if (viewMode === 'message' && combinedMessages.length > 0) {
-      // Message detail view navigation
-      const currentMessage = combinedMessages[selectedMessageIndex];
-      if (key.escape || key.backspace || key.delete) {
-        setViewMode('conversation');
-        setMessageScrollOffset(0);
-      } else if (input === 'j' || key.downArrow) {
-        // Use rendered line count and match MessageDetailView's visible height calculation
-        // MessageDetailView receives availableHeight and subtracts headerHeight=3 for visible lines
-        const lineCount = currentMessage ? getRenderedLineCount(currentMessage.content, width) : 0;
-        const visibleLines = availableHeight - 3; // matches MessageDetailView
-        const maxOffset = Math.max(0, lineCount - visibleLines);
-        setMessageScrollOffset((o) => Math.min(o + 1, maxOffset));
-      } else if (input === 'k' || key.upArrow) {
-        setMessageScrollOffset((o) => Math.max(o - 1, 0));
-      } else if (input === 'g') {
-        setMessageScrollOffset(0);
-      } else if (input === 'G') {
-        const lineCount = currentMessage ? getRenderedLineCount(currentMessage.content, width) : 0;
-        const visibleLines = availableHeight - 3;
-        setMessageScrollOffset(Math.max(0, lineCount - visibleLines));
-      } else if (input === 'n') {
-        // Next message
-        if (selectedMessageIndex < combinedMessages.length - 1) {
-          setSelectedMessageIndex((i) => i + 1);
-          setMessageScrollOffset(0);
+    // Priority 4: Multi-select mode handling in list view
+    if (navState.viewMode === 'list' && multiSelectMode) {
+      if (input === ' ') {
+        const current = response.results[navState.selectedIndex];
+        if (current) {
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(current.conversation.id)) {
+              next.delete(current.conversation.id);
+            } else {
+              next.add(current.conversation.id);
+            }
+            return next;
+          });
         }
-      } else if (input === 'p') {
-        // Previous message
-        if (selectedMessageIndex > 0) {
-          setSelectedMessageIndex((i) => i - 1);
-          setMessageScrollOffset(0);
-        }
-      }
-    } else if (viewMode === 'conversation' && expandedResult) {
-      // Conversation view navigation
-      // Use same calculation as ConversationView component
-      const headerHeight = 5 + (conversationFiles.length > 0 ? 1 : 0);
-      const messagesPerPage = Math.max(1, Math.floor((availableHeight - headerHeight) / 3));
-      const maxScrollOffset = Math.max(0, combinedMessages.length - messagesPerPage);
-
-      if (key.escape || key.backspace || key.delete) {
-        setViewMode('matches');
-        setCombinedMessages([]);
-        setMessageIndexMap(new Map());
-        setHighlightMessageIndex(undefined);
-        setSelectedMessageIndex(0);
-      } else if (input === 'j' || key.downArrow) {
-        const newIdx = Math.min(selectedMessageIndex + 1, combinedMessages.length - 1);
-        setSelectedMessageIndex(newIdx);
-        // Adjust scroll to keep selected message visible
-        if (newIdx >= conversationScrollOffset + messagesPerPage) {
-          setConversationScrollOffset(Math.min(newIdx - messagesPerPage + 1, maxScrollOffset));
-        }
-      } else if (input === 'k' || key.upArrow) {
-        const newIdx = Math.max(selectedMessageIndex - 1, 0);
-        setSelectedMessageIndex(newIdx);
-        if (newIdx < conversationScrollOffset) {
-          setConversationScrollOffset(newIdx);
-        }
-      } else if (input === 'g') {
-        setConversationScrollOffset(0);
-        setSelectedMessageIndex(0);
-      } else if (input === 'G') {
-        setConversationScrollOffset(maxScrollOffset);
-        setSelectedMessageIndex(combinedMessages.length - 1);
-      } else if (key.return) {
-        // Open message detail view
-        setViewMode('message');
-        setMessageScrollOffset(0);
-      }
-    } else if (viewMode === 'matches' && expandedResult) {
-      // Matches view navigation
-      if (key.escape || key.backspace || key.delete) {
-        setViewMode('list');
-        setExpandedIndex(null);
-        setExpandedScrollOffset(0);
-        setExpandedSelectedMatch(0);
-      } else if (input === 'j' || key.downArrow) {
-        const maxIdx = expandedResult.matches.length - 1;
-        setExpandedSelectedMatch((i) => {
-          const newIdx = Math.min(findNextDistinctMatch(i, 1), maxIdx);
-          const matchesPerPage = Math.max(1, Math.floor((height - 8) / 4));
-          const maxOffset = Math.max(0, expandedResult.matches.length - matchesPerPage);
-          let offset = expandedScrollOffset;
-          if (newIdx < offset) {
-            offset = newIdx;
-          } else if (newIdx >= offset + matchesPerPage) {
-            offset = newIdx - matchesPerPage + 1;
-          }
-          offset = Math.min(Math.max(offset, 0), maxOffset);
-          setExpandedScrollOffset(offset);
-          return newIdx;
-        });
-      } else if (input === 'k' || key.upArrow) {
-        setExpandedSelectedMatch((i) => {
-          const newIdx = Math.max(findNextDistinctMatch(i, -1), 0);
-          const matchesPerPage = Math.max(1, Math.floor((height - 8) / 4));
-          const maxOffset = Math.max(0, expandedResult.matches.length - matchesPerPage);
-          let offset = expandedScrollOffset;
-          if (newIdx < offset) {
-            offset = newIdx;
-          } else if (newIdx >= offset + matchesPerPage) {
-            offset = newIdx - matchesPerPage + 1;
-          }
-          offset = Math.min(Math.max(offset, 0), maxOffset);
-          setExpandedScrollOffset(offset);
-          return newIdx;
-        });
-      } else if (key.return) {
-        // Open full conversation view, scrolled to the selected match
-        const selectedMatch = expandedResult.matches[expandedSelectedMatch];
-        if (selectedMatch) {
-          setViewMode('conversation');
-          loadConversation(expandedResult.conversation.id, selectedMatch.messageIndex);
-        }
-      }
-    } else {
-      // List view navigation
-
-      // Multi-select mode handling
-      if (multiSelectMode) {
-        if (input === ' ') {
-          const current = response.results[selectedIndex];
-          if (current) {
-            setSelectedIds((prev) => {
-              const next = new Set(prev);
-              if (next.has(current.conversation.id)) {
-                next.delete(current.conversation.id);
-              } else {
-                next.add(current.conversation.id);
-              }
-              return next;
-            });
-          }
-          return;
-        }
-        if (input === 'v' || key.escape) {
-          setMultiSelectMode(false);
-          setSelectedIds(new Set());
-          return;
-        }
-        // Fall through to navigation
-      }
-
-      // Multi-select trigger
-      if (input === 'v') {
-        setMultiSelectMode(true);
         return;
       }
-
-      // Standard navigation
-      if (input === 'j' || key.downArrow) {
-        setSelectedIndex((i) => Math.min(i + 1, response.results.length - 1));
-      } else if (input === 'k' || key.upArrow) {
-        setSelectedIndex((i) => Math.max(i - 1, 0));
-      } else if (key.return || input === 'o') {
-        if (!multiSelectMode) {
-          setViewMode('matches');
-          setExpandedIndex(selectedIndex);
-          setExpandedScrollOffset(0);
-          setExpandedSelectedMatch(0);
-        }
+      if (input === 'v' || key.escape) {
+        setMultiSelectMode(false);
+        setSelectedIds(new Set());
+        return;
       }
+    }
+
+    // Multi-select trigger in list view
+    if (navState.viewMode === 'list' && input === 'v') {
+      setMultiSelectMode(true);
+      return;
+    }
+
+    // Priority 5: Navigation (uses shared hook)
+    if (handleNavigationInput(input, key)) {
+      return;
     }
   });
 
@@ -596,12 +314,12 @@ function SearchApp({
     );
   }
 
-  // Footer keybindings styled with keys highlighted
+  // Footer keybindings
   const Key = ({ k }: { k: string }) => <Text color="white">{k}</Text>;
   const Sep = () => <Text dimColor> · </Text>;
 
   let footerContent: React.ReactNode;
-  if (viewMode === 'message') {
+  if (navState.viewMode === 'message') {
     footerContent = (
       <>
         <Key k="e" /><Text dimColor>: export</Text><Sep />
@@ -611,7 +329,7 @@ function SearchApp({
         <Key k="q" /><Text dimColor>: quit</Text>
       </>
     );
-  } else if (viewMode === 'conversation') {
+  } else if (navState.viewMode === 'conversation') {
     footerContent = (
       <>
         <Key k="e" /><Text dimColor>: export</Text><Sep />
@@ -621,7 +339,7 @@ function SearchApp({
         <Key k="q" /><Text dimColor>: quit</Text>
       </>
     );
-  } else if (viewMode === 'matches') {
+  } else if (navState.viewMode === 'matches') {
     footerContent = (
       <>
         <Key k="e" /><Text dimColor>: export</Text><Sep />
@@ -660,9 +378,7 @@ function SearchApp({
         <Box paddingX={1}>
           <Text bold color="white">Search </Text>
           {filePattern && !query ? (
-            <>
-              <Text color="yellow" bold>--file "{filePattern}"</Text>
-            </>
+            <Text color="yellow" bold>--file "{filePattern}"</Text>
           ) : filePattern ? (
             <>
               <Text color="cyan" bold>"{query}"</Text>
@@ -687,39 +403,39 @@ function SearchApp({
       <Box flexDirection="column" flexGrow={1} paddingX={1}>
         {response.results.length === 0 ? (
           <Text dimColor>No results found.</Text>
-        ) : viewMode === 'message' && combinedMessages[selectedMessageIndex] ? (
+        ) : navState.viewMode === 'message' && navState.combinedMessages[navState.selectedMessageIndex] ? (
           <MessageDetailView
-            message={combinedMessages[selectedMessageIndex]!}
-            messageFiles={conversationMessageFiles}
+            message={navState.combinedMessages[navState.selectedMessageIndex]!}
+            messageFiles={navState.conversationMessageFiles}
             width={width - 2}
             height={availableHeight}
-            scrollOffset={messageScrollOffset}
+            scrollOffset={navState.messageScrollOffset}
             query={query}
           />
-        ) : viewMode === 'conversation' && expandedResult ? (
+        ) : navState.viewMode === 'conversation' && expandedResult ? (
           <ConversationView
             conversation={expandedResult.conversation}
-            messages={combinedMessages}
-            files={conversationFiles}
-            messageFiles={conversationMessageFiles}
+            messages={navState.combinedMessages}
+            files={navState.conversationFiles}
+            messageFiles={navState.conversationMessageFiles}
             width={width - 2}
             height={availableHeight}
-            scrollOffset={conversationScrollOffset}
-            highlightMessageIndex={highlightMessageIndex}
-            selectedIndex={selectedMessageIndex}
+            scrollOffset={navState.conversationScrollOffset}
+            highlightMessageIndex={navState.highlightMessageIndex}
+            selectedIndex={navState.selectedMessageIndex}
           />
-        ) : viewMode === 'matches' && expandedResult ? (
+        ) : navState.viewMode === 'matches' && expandedResult ? (
           <MatchesView
             result={expandedResult}
-            files={conversationFiles}
-            messageFiles={conversationMessageFiles}
+            files={navState.conversationFiles}
+            messageFiles={navState.conversationMessageFiles}
             width={width - 2}
             height={availableHeight}
-            scrollOffset={expandedScrollOffset}
-            selectedMatchIndex={expandedSelectedMatch}
+            scrollOffset={navState.expandedScrollOffset}
+            selectedMatchIndex={navState.expandedSelectedMatch}
             query={query}
-            indexMap={messageIndexMap}
-            combinedMessageCount={combinedMessages.length}
+            indexMap={navState.messageIndexMap}
+            combinedMessageCount={navState.combinedMessages.length}
           />
         ) : (
           visibleResults.map((result, idx) => {
@@ -735,7 +451,7 @@ function SearchApp({
                 )}
                 <ResultRow
                   result={result}
-                  isSelected={actualIndex === selectedIndex}
+                  isSelected={actualIndex === navState.selectedIndex}
                   width={multiSelectMode ? width - 6 : width - 2}
                   query={query}
                   fileMatches={convFileMatches}
@@ -753,7 +469,7 @@ function SearchApp({
         </Box>
         <Box paddingX={1} justifyContent="space-between">
           <Text>{footerContent}</Text>
-          {viewMode === 'list' && response.results.length > visibleCount && (
+          {navState.viewMode === 'list' && response.results.length > visibleCount && (
             <Text color="gray">
               {scrollOffset + 1}-{Math.min(scrollOffset + visibleCount, response.results.length)} of {response.results.length}
             </Text>
@@ -793,7 +509,6 @@ async function plainSearch(query: string, limit: number, filePattern?: string): 
   let totalMessages = 0;
 
   if (filePattern && !query) {
-    // File-only search
     const fileResults = await searchByFilePath(filePattern, limit);
     const convIdToMatches = new Map<string, FileSearchMatch[]>();
     for (const match of fileResults) {
@@ -818,7 +533,6 @@ async function plainSearch(query: string, limit: number, filePattern?: string): 
       });
     totalConversations = results.length;
   } else if (filePattern && query) {
-    // Combined search
     const result = await search(query, limit * 2);
     const convIds = new Set(result.results.map((r) => r.conversation.id));
     const fileMatchMap = await getFileMatchesForConversations(convIds, filePattern);
@@ -834,7 +548,6 @@ async function plainSearch(query: string, limit: number, filePattern?: string): 
     totalConversations = results.length;
     totalMessages = result.totalMessages;
   } else {
-    // Standard search
     const result = await search(query, limit);
     results = result.results.map((r) => ({
       conversation: r.conversation,
@@ -880,7 +593,6 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
   const limit = parseInt(options.limit ?? '20', 10);
   const filePattern = options.file;
 
-  // Require at least query or file pattern
   if (!query && !filePattern) {
     console.error('Error: Please provide a search query or --file pattern');
     process.exit(1);

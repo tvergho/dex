@@ -246,7 +246,7 @@ describe('formatSourceInfo', () => {
 
   it('formats source with model', () => {
     expect(formatSourceInfo('cursor', 'gpt-4')).toBe('Cursor · gpt-4');
-    expect(formatSourceInfo('claude-code', 'claude-3-opus')).toBe('Claude-code · claude-3-opus');
+    expect(formatSourceInfo('claude-code', 'claude-3-opus')).toBe('Claude Code · claude-3-opus');
   });
 });
 
