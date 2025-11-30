@@ -34,7 +34,7 @@ import {
 } from '../../embeddings/index';
 import { printRichSummary } from './stats';
 
-interface SyncProgress {
+export interface SyncProgress {
   phase:
     | 'detecting'
     | 'discovering'
@@ -163,7 +163,7 @@ function spawnBackgroundEmbedding(): void {
   child.unref();
 }
 
-async function runSync(
+export async function runSync(
   options: SyncOptions,
   onProgress: (progress: SyncProgress) => void
 ): Promise<void> {

@@ -222,15 +222,27 @@ export const conversationRepo = {
     source?: string;
   } = {}): Promise<Conversation[]> {
     const table = await getConversationsTable();
-    let query = table.query();
 
+    // Fetch all to sort properly (LanceDB doesn't support ORDER BY)
+    const results = await table.query().toArray();
+
+    // Filter by source if specified
+    let filtered = results;
     if (opts.source) {
-      query = query.where(`source = '${opts.source}'`);
+      filtered = results.filter((row) => (row.source as string) === opts.source);
     }
 
-    const results = await query.limit(opts.limit ?? 50).toArray();
+    // Sort by updatedAt descending (most recent first)
+    filtered.sort((a, b) => {
+      const aDate = a.updatedAt as string || '';
+      const bDate = b.updatedAt as string || '';
+      return bDate.localeCompare(aDate);
+    });
 
-    return results.map((row) => ({
+    // Apply limit after sorting
+    const limited = filtered.slice(0, opts.limit ?? 50);
+
+    return limited.map((row) => ({
       id: row.id as string,
       source: row.source as Conversation['source'],
       title: row.title as string,
@@ -250,6 +262,12 @@ export const conversationRepo = {
       totalLinesAdded: (row.totalLinesAdded as number) || undefined,
       totalLinesRemoved: (row.totalLinesRemoved as number) || undefined,
     }));
+  },
+
+  async count(): Promise<number> {
+    const table = await getConversationsTable();
+    const results = await table.query().select(['id']).toArray();
+    return results.length;
   },
 
   async delete(id: string): Promise<void> {
