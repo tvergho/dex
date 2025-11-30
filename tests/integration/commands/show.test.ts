@@ -4,50 +4,24 @@
  * Tests the non-TTY (plain text) output mode since TUI is harder to test.
  */
 
-import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
-import { TestDatabase } from '../../helpers/db';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { TestDatabase, setupCliTest } from '../../helpers';
 import { createConversation, createMessage, createConversationFile } from '../../fixtures';
 
 describe('show command', () => {
   let db: TestDatabase;
-  let consoleLogSpy: ReturnType<typeof spyOn>;
-  let consoleErrorSpy: ReturnType<typeof spyOn>;
-  let originalIsTTY: boolean | undefined;
-  let processExitSpy: ReturnType<typeof spyOn>;
+  let cli: ReturnType<typeof setupCliTest>;
 
   beforeEach(async () => {
     db = new TestDatabase();
     await db.setup();
-
-    // Capture console output
-    consoleLogSpy = spyOn(console, 'log').mockImplementation(() => {});
-    consoleErrorSpy = spyOn(console, 'error').mockImplementation(() => {});
-
-    // Mock process.exit to prevent test from exiting
-    processExitSpy = spyOn(process, 'exit').mockImplementation(() => {
-      throw new Error('process.exit called');
-    });
-
-    // Force non-TTY mode to use plain text output
-    originalIsTTY = process.stdin.isTTY;
-    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    cli = setupCliTest();
   });
 
   afterEach(async () => {
-    consoleLogSpy.mockRestore();
-    consoleErrorSpy.mockRestore();
-    processExitSpy.mockRestore();
-    Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+    cli.restore();
     await db.teardown();
   });
-
-  function getOutput(): string {
-    return consoleLogSpy.mock.calls.map((call) => call.join(' ')).join('\n');
-  }
-
-  function getErrorOutput(): string {
-    return consoleErrorSpy.mock.calls.map((call) => call.join(' ')).join('\n');
-  }
 
   describe('error handling', () => {
     it('shows error for non-existent conversation', async () => {
@@ -59,10 +33,11 @@ describe('show command', () => {
         // Expected - process.exit was called
       }
 
-      const errorOutput = getErrorOutput();
+      const errorOutput = cli.getErrorOutput();
       expect(errorOutput).toContain('Conversation not found');
       expect(errorOutput).toContain('non-existent-id');
-      expect(processExitSpy).toHaveBeenCalledWith(1);
+      expect(cli.exitWasCalled()).toBe(true);
+      expect(cli.getExitCode()).toBe(1);
     });
   });
 
@@ -74,7 +49,7 @@ describe('show command', () => {
       const { showCommand } = await import('../../../src/cli/commands/show');
       await showCommand(conv.id);
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('My Test Conversation');
     });
 
@@ -85,7 +60,7 @@ describe('show command', () => {
       const { showCommand } = await import('../../../src/cli/commands/show');
       await showCommand(conv.id);
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('Cursor');
     });
 
@@ -99,7 +74,7 @@ describe('show command', () => {
       const { showCommand } = await import('../../../src/cli/commands/show');
       await showCommand(conv.id);
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('Cursor · gpt-4-turbo');
     });
 
@@ -112,7 +87,7 @@ describe('show command', () => {
       const { showCommand } = await import('../../../src/cli/commands/show');
       await showCommand(conv.id);
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('/home/user/my-project');
     });
 
@@ -123,7 +98,7 @@ describe('show command', () => {
       const { showCommand } = await import('../../../src/cli/commands/show');
       await showCommand(conv.id);
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('15 messages');
     });
   });
@@ -141,7 +116,7 @@ describe('show command', () => {
       const { showCommand } = await import('../../../src/cli/commands/show');
       await showCommand(conv.id);
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('[You]');
       expect(output).toContain('Hello there');
       expect(output).toContain('[Assistant]');
@@ -166,7 +141,7 @@ describe('show command', () => {
       const { showCommand } = await import('../../../src/cli/commands/show');
       await showCommand(conv.id);
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('[System]');
       expect(output).toContain('System prompt here');
     });
@@ -182,7 +157,7 @@ describe('show command', () => {
       const { showCommand } = await import('../../../src/cli/commands/show');
       await showCommand(conv.id);
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('… (truncated)');
     });
   });
@@ -199,7 +174,7 @@ describe('show command', () => {
       const { showCommand } = await import('../../../src/cli/commands/show');
       await showCommand(conv.id);
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('Files:');
       expect(output).toContain('app.tsx');
       expect(output).toContain('utils.ts');
@@ -215,7 +190,7 @@ describe('show command', () => {
       const { showCommand } = await import('../../../src/cli/commands/show');
       await showCommand(conv.id);
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('Files:');
       expect(output).toContain('+5 more');
     });
@@ -232,7 +207,7 @@ describe('show command', () => {
       const { showCommand } = await import('../../../src/cli/commands/show');
       await showCommand(conv.id);
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('Empty Conv');
       expect(output).toContain('0 messages');
     });
@@ -249,7 +224,7 @@ describe('show command', () => {
       const { showCommand } = await import('../../../src/cli/commands/show');
       await showCommand(conv.id);
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('Claude-code');
       expect(output).toContain('claude-3-opus-20240229');
     });
@@ -261,9 +236,8 @@ describe('show command', () => {
       const { showCommand } = await import('../../../src/cli/commands/show');
       await showCommand(conv.id);
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('Codex');
     });
   });
 });
-

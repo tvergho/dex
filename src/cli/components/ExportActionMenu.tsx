@@ -9,14 +9,13 @@ export interface ExportActionMenuProps {
 }
 
 const ACTIONS = [
-  { label: 'Export to file', description: 'Save as markdown in ./dex-export/' },
+  { label: 'Export to file', description: 'Save as markdown' },
   { label: 'Copy to clipboard', description: 'Copy markdown to clipboard' },
-  { label: 'Show preview', description: 'Preview markdown before exporting' },
 ];
 
 /**
  * Centered modal overlay for export action selection
- * Uses a solid background to ensure readability over content
+ * Simplified 2-option design with improved spacing and contrast
  */
 export function ExportActionMenu({
   selectedIndex,
@@ -24,8 +23,8 @@ export function ExportActionMenu({
   width,
   height,
 }: ExportActionMenuProps) {
-  const menuWidth = Math.min(60, width - 4);
-  const menuHeight = 11;
+  const menuWidth = Math.min(44, width - 4);
+  const menuHeight = 14; // Increased for better spacing
 
   // Center the menu
   const leftPadding = Math.floor((width - menuWidth) / 2);
@@ -36,8 +35,8 @@ export function ExportActionMenu({
       ? 'Export conversation'
       : `Export ${conversationCount} conversations`;
 
-  // Create solid background lines
-  const bgLine = ' '.repeat(menuWidth - 2);
+  // Helper to create a padded line
+  const pad = (content: string) => content.padEnd(menuWidth - 4);
 
   return (
     <Box
@@ -50,44 +49,73 @@ export function ExportActionMenu({
       {/* Top border */}
       <Text color="cyan">{'╭' + '─'.repeat(menuWidth - 2) + '╮'}</Text>
 
-      {/* Title with background */}
+      {/* Empty line for top padding */}
       <Text>
         <Text color="cyan">│</Text>
-        <Text backgroundColor="black">{' ' + title.padEnd(menuWidth - 4) + ' '}</Text>
+        <Text backgroundColor="black">{' '.repeat(menuWidth - 2)}</Text>
         <Text color="cyan">│</Text>
       </Text>
 
-      {/* Separator */}
+      {/* Title */}
       <Text>
-        <Text color="cyan">├{'─'.repeat(menuWidth - 2)}┤</Text>
+        <Text color="cyan">│</Text>
+        <Text backgroundColor="black" color="white" bold>{' ' + pad(title) + ' '}</Text>
+        <Text color="cyan">│</Text>
       </Text>
 
-      {/* Actions with solid background */}
+      {/* Empty line after title */}
+      <Text>
+        <Text color="cyan">│</Text>
+        <Text backgroundColor="black">{' '.repeat(menuWidth - 2)}</Text>
+        <Text color="cyan">│</Text>
+      </Text>
+
+      {/* Actions with description on separate line */}
       {ACTIONS.map((action, idx) => {
         const isSelected = idx === selectedIndex;
-        const prefix = isSelected ? ' ▸ ' : '   ';
-        const labelWithDesc = `${prefix}${action.label.padEnd(20)} ${action.description}`;
-        const paddedContent = labelWithDesc.slice(0, menuWidth - 4).padEnd(menuWidth - 4);
+        const prefix = isSelected ? '  ▸ ' : '    ';
 
         return (
-          <Text key={action.label}>
-            <Text color="cyan">│</Text>
-            <Text
-              backgroundColor={isSelected ? 'cyan' : 'black'}
-              color={isSelected ? 'black' : 'white'}
-              bold={isSelected}
-            >
-              {' ' + paddedContent + ' '}
+          <React.Fragment key={action.label}>
+            {/* Action label */}
+            <Text>
+              <Text color="cyan">│</Text>
+              <Text
+                backgroundColor={isSelected ? 'cyan' : 'black'}
+                color={isSelected ? 'black' : 'white'}
+                bold={isSelected}
+              >
+                {pad(prefix + action.label) + '  '}
+              </Text>
+              <Text color="cyan">│</Text>
             </Text>
-            <Text color="cyan">│</Text>
-          </Text>
+            {/* Action description */}
+            <Text>
+              <Text color="cyan">│</Text>
+              <Text
+                backgroundColor={isSelected ? 'cyan' : 'black'}
+                color={isSelected ? 'black' : 'gray'}
+              >
+                {pad('      ' + action.description) + '  '}
+              </Text>
+              <Text color="cyan">│</Text>
+            </Text>
+            {/* Spacing between options */}
+            {idx < ACTIONS.length - 1 && (
+              <Text>
+                <Text color="cyan">│</Text>
+                <Text backgroundColor="black">{' '.repeat(menuWidth - 2)}</Text>
+                <Text color="cyan">│</Text>
+              </Text>
+            )}
+          </React.Fragment>
         );
       })}
 
-      {/* Empty line for spacing */}
+      {/* Empty line before footer */}
       <Text>
         <Text color="cyan">│</Text>
-        <Text backgroundColor="black">{bgLine}</Text>
+        <Text backgroundColor="black">{' '.repeat(menuWidth - 2)}</Text>
         <Text color="cyan">│</Text>
       </Text>
 
@@ -95,13 +123,20 @@ export function ExportActionMenu({
       <Text>
         <Text color="cyan">│</Text>
         <Text backgroundColor="black">
-          {' '}
-          <Text bold color="white">Enter</Text>
+          {'  '}
+          <Text color="white">Enter</Text>
           <Text color="gray"> select · </Text>
-          <Text bold color="white">Esc</Text>
+          <Text color="white">Esc</Text>
           <Text color="gray"> cancel</Text>
           {' '.repeat(Math.max(0, menuWidth - 28))}
         </Text>
+        <Text color="cyan">│</Text>
+      </Text>
+
+      {/* Empty line for bottom padding */}
+      <Text>
+        <Text color="cyan">│</Text>
+        <Text backgroundColor="black">{' '.repeat(menuWidth - 2)}</Text>
         <Text color="cyan">│</Text>
       </Text>
 

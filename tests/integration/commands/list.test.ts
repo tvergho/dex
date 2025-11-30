@@ -4,44 +4,32 @@
  * Tests the non-TTY (plain text) output mode since TUI is harder to test.
  */
 
-import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
-import { TestDatabase } from '../../helpers/db';
-import { createConversation, createMessage } from '../../fixtures';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { TestDatabase, setupCliTest } from '../../helpers';
+import { createConversation } from '../../fixtures';
 import { isoDate } from '../../helpers/time';
 
 describe('list command', () => {
   let db: TestDatabase;
-  let consoleLogSpy: ReturnType<typeof spyOn>;
-  let originalIsTTY: boolean | undefined;
+  let cli: ReturnType<typeof setupCliTest>;
 
   beforeEach(async () => {
     db = new TestDatabase();
     await db.setup();
-
-    // Capture console output
-    consoleLogSpy = spyOn(console, 'log').mockImplementation(() => {});
-
-    // Force non-TTY mode to use plain text output
-    originalIsTTY = process.stdin.isTTY;
-    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    cli = setupCliTest();
   });
 
   afterEach(async () => {
-    consoleLogSpy.mockRestore();
-    Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+    cli.restore();
     await db.teardown();
   });
-
-  function getOutput(): string {
-    return consoleLogSpy.mock.calls.map((call) => call.join(' ')).join('\n');
-  }
 
   describe('basic listing', () => {
     it('shows message when no conversations exist', async () => {
       const { listCommand } = await import('../../../src/cli/commands/list');
       await listCommand({});
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('Conversations (0)');
       expect(output).toContain('No conversations found');
       expect(output).toContain('Run `dex sync`');
@@ -58,7 +46,7 @@ describe('list command', () => {
       const { listCommand } = await import('../../../src/cli/commands/list');
       await listCommand({});
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('Conversations (1)');
       expect(output).toContain('Test Conversation');
       expect(output).toContain('Cursor');
@@ -76,7 +64,7 @@ describe('list command', () => {
       const { listCommand } = await import('../../../src/cli/commands/list');
       await listCommand({});
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('/home/user/my-project');
     });
 
@@ -91,7 +79,7 @@ describe('list command', () => {
       const { listCommand } = await import('../../../src/cli/commands/list');
       await listCommand({});
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('Cursor · gpt-4-turbo');
     });
 
@@ -106,7 +94,7 @@ describe('list command', () => {
       const { listCommand } = await import('../../../src/cli/commands/list');
       await listCommand({});
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('10K in');
       expect(output).toContain('5.0K out');
     });
@@ -122,7 +110,7 @@ describe('list command', () => {
       const { listCommand } = await import('../../../src/cli/commands/list');
       await listCommand({});
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('+100');
       expect(output).toContain('-25');
     });
@@ -147,7 +135,7 @@ describe('list command', () => {
       const { listCommand } = await import('../../../src/cli/commands/list');
       await listCommand({});
 
-      const output = getOutput();
+      const output = cli.getOutput();
       const newIndex = output.indexOf('New Conv');
       const middleIndex = output.indexOf('Middle Conv');
       const oldIndex = output.indexOf('Old Conv');
@@ -170,7 +158,7 @@ describe('list command', () => {
       const { listCommand } = await import('../../../src/cli/commands/list');
       await listCommand({ limit: '3' });
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('Conversations (3)');
       expect(output).toContain('Conv 10'); // Most recent
       expect(output).toContain('Conv 9');
@@ -190,7 +178,7 @@ describe('list command', () => {
       const { listCommand } = await import('../../../src/cli/commands/list');
       await listCommand({});
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('Conversations (20)');
     });
   });
@@ -210,7 +198,7 @@ describe('list command', () => {
       const { listCommand } = await import('../../../src/cli/commands/list');
       await listCommand({ source: 'cursor' });
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('Conversations (1)');
       expect(output).toContain('Cursor Conv');
       expect(output).not.toContain('Claude Conv');
@@ -226,7 +214,7 @@ describe('list command', () => {
       const { listCommand } = await import('../../../src/cli/commands/list');
       await listCommand({ source: 'codex' });
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('Conversations (0)');
       expect(output).toContain('No conversations found');
     });
@@ -243,9 +231,8 @@ describe('list command', () => {
       const { listCommand } = await import('../../../src/cli/commands/list');
       await listCommand({});
 
-      const output = getOutput();
+      const output = cli.getOutput();
       expect(output).toContain('today');
     });
   });
 });
-

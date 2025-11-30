@@ -78,15 +78,54 @@ export function mockProcessExit() {
  * Capture both console output and process.exit in one helper
  */
 export function mockCli() {
-  const console = mockConsole();
+  const consoleMock = mockConsole();
   const processExit = mockProcessExit();
 
   return {
-    console,
+    console: consoleMock,
     processExit,
     restore: () => {
-      console.restore();
+      consoleMock.restore();
       processExit.restore();
+    },
+  };
+}
+
+/**
+ * Force non-TTY mode for testing plain text output
+ */
+export function mockNonTTY() {
+  const originalIsTTY = process.stdin.isTTY;
+
+  Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+
+  return {
+    restore: () => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+    },
+  };
+}
+
+/**
+ * Combined CLI test setup: non-TTY mode + console capture + process.exit mock
+ */
+export function setupCliTest() {
+  const tty = mockNonTTY();
+  const cli = mockCli();
+
+  return {
+    /** Get all console.log output as a single string */
+    getOutput: () => cli.console.logs.join('\n'),
+    /** Get all console.error output as a single string */
+    getErrorOutput: () => cli.console.errors.join('\n'),
+    /** Check if process.exit was called */
+    exitWasCalled: () => cli.processExit.wasCalled(),
+    /** Get the exit code */
+    getExitCode: () => cli.processExit.getExitCode(),
+    /** Restore all mocks */
+    restore: () => {
+      tty.restore();
+      cli.restore();
     },
   };
 }

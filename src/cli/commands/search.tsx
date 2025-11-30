@@ -30,9 +30,7 @@ import {
   ConversationView,
   MessageDetailView,
   ExportActionMenu,
-  ExportPreviewModal,
   StatusToast,
-  getPreviewMaxOffset,
 } from '../components/index';
 import {
   formatRelativeTime,
@@ -45,7 +43,6 @@ import {
 import {
   exportConversationsToFile,
   exportConversationsToClipboard,
-  generatePreviewContent,
 } from '../../utils/export-actions';
 import { type SearchResponse, type ConversationFile, type MessageFile, type Conversation, type SourceType } from '../../schema/index';
 
@@ -55,7 +52,7 @@ interface SearchOptions {
 }
 
 type ViewMode = 'list' | 'matches' | 'conversation' | 'message';
-type ExportMode = 'none' | 'action-menu' | 'preview';
+type ExportMode = 'none' | 'action-menu';
 
 function SearchApp({
   query,
@@ -101,8 +98,6 @@ function SearchApp({
   // Export state
   const [exportMode, setExportMode] = useState<ExportMode>('none');
   const [exportActionIndex, setExportActionIndex] = useState(0);
-  const [previewContent, setPreviewContent] = useState('');
-  const [previewScrollOffset, setPreviewScrollOffset] = useState(0);
 
   // Status toast
   const [statusMessage, setStatusMessage] = useState('');
@@ -359,22 +354,12 @@ function SearchApp({
         setExportActionIndex(0);
         setMultiSelectMode(false);
         setSelectedIds(new Set());
-      } else if (exportActionIndex === 2) {
-        // Show preview (only first conversation)
-        const content = await generatePreviewContent(toExport[0]!);
-        setPreviewContent(content);
-        setPreviewScrollOffset(0);
-        setExportMode('preview');
       }
     } catch (err) {
       showStatus(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
       setExportMode('none');
     }
   }, [getConversationsToExport, exportActionIndex, showStatus]);
-
-  // Preview content height for scrolling
-  const previewContentHeight = height - 5;
-  const previewMaxOffset = getPreviewMaxOffset(previewContent, previewContentHeight);
 
   useInput((input, key) => {
     // Priority 1: Quit
@@ -383,26 +368,10 @@ function SearchApp({
       return;
     }
 
-    // Priority 2: Export preview mode
-    if (exportMode === 'preview') {
-      if (input === 'j' || key.downArrow) {
-        setPreviewScrollOffset((o) => Math.min(o + 1, previewMaxOffset));
-      } else if (input === 'k' || key.upArrow) {
-        setPreviewScrollOffset((o) => Math.max(o - 1, 0));
-      } else if (input === 'g') {
-        setPreviewScrollOffset(0);
-      } else if (input === 'G') {
-        setPreviewScrollOffset(previewMaxOffset);
-      } else if (key.escape) {
-        setExportMode('action-menu');
-      }
-      return;
-    }
-
-    // Priority 3: Export action menu
+    // Priority 2: Export action menu
     if (exportMode === 'action-menu') {
       if (input === 'j' || key.downArrow) {
-        setExportActionIndex((i) => Math.min(i + 1, 2));
+        setExportActionIndex((i) => Math.min(i + 1, 1)); // Only 2 options (0-1)
       } else if (input === 'k' || key.upArrow) {
         setExportActionIndex((i) => Math.max(i - 1, 0));
       } else if (key.return) {
@@ -415,6 +384,19 @@ function SearchApp({
     }
 
     if (!response || response.results.length === 0) return;
+
+    // Priority 3: Export trigger - works in ALL view modes
+    // In multi-select mode, only allow when items are selected
+    if (input === 'e') {
+      if (multiSelectMode) {
+        if (selectedIds.size > 0) {
+          setExportMode('action-menu');
+        }
+      } else if (getCurrentConversation()) {
+        setExportMode('action-menu');
+      }
+      return;
+    }
 
     if (viewMode === 'message' && combinedMessages.length > 0) {
       // Message detail view navigation
@@ -549,22 +531,12 @@ function SearchApp({
           }
           return;
         }
-        if (input === 'e' && selectedIds.size > 0) {
-          setExportMode('action-menu');
-          return;
-        }
         if (input === 'v' || key.escape) {
           setMultiSelectMode(false);
           setSelectedIds(new Set());
           return;
         }
         // Fall through to navigation
-      }
-
-      // Export trigger (single conversation, any view)
-      if (input === 'e' && !multiSelectMode) {
-        setExportMode('action-menu');
-        return;
       }
 
       // Multi-select trigger
@@ -627,9 +599,9 @@ function SearchApp({
   if (viewMode === 'message') {
     footerContent = (
       <>
+        <Key k="e" /><Text dimColor>: export</Text><Sep />
         <Key k="j/k" /><Text dimColor>: scroll</Text><Sep />
         <Key k="n/p" /><Text dimColor>: next/prev</Text><Sep />
-        <Key k="g/G" /><Text dimColor>: top/bottom</Text><Sep />
         <Key k="Esc" /><Text dimColor>: back</Text><Sep />
         <Key k="q" /><Text dimColor>: quit</Text>
       </>
@@ -637,9 +609,9 @@ function SearchApp({
   } else if (viewMode === 'conversation') {
     footerContent = (
       <>
+        <Key k="e" /><Text dimColor>: export</Text><Sep />
         <Key k="j/k" /><Text dimColor>: select</Text><Sep />
         <Key k="Enter" /><Text dimColor>: view full</Text><Sep />
-        <Key k="g/G" /><Text dimColor>: top/bottom</Text><Sep />
         <Key k="Esc" /><Text dimColor>: back</Text><Sep />
         <Key k="q" /><Text dimColor>: quit</Text>
       </>
@@ -789,17 +761,6 @@ function SearchApp({
         <ExportActionMenu
           selectedIndex={exportActionIndex}
           conversationCount={getConversationsToExport().length}
-          width={width}
-          height={height}
-        />
-      )}
-
-      {/* Export preview overlay */}
-      {exportMode === 'preview' && (
-        <ExportPreviewModal
-          content={previewContent}
-          title={getConversationsToExport()[0]?.title ?? 'Preview'}
-          scrollOffset={previewScrollOffset}
           width={width}
           height={height}
         />

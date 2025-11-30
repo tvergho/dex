@@ -23,11 +23,10 @@ import {
   getLineCountParts,
 } from '../../utils/format';
 import type { Conversation } from '../../schema/index';
-import { ExportActionMenu, ExportPreviewModal, StatusToast, getPreviewMaxOffset } from '../components/index';
+import { ExportActionMenu, StatusToast } from '../components/index';
 import {
   exportConversationsToFile,
   exportConversationsToClipboard,
-  generatePreviewContent,
 } from '../../utils/export-actions';
 
 interface ListOptions {
@@ -120,7 +119,7 @@ function ConversationRow({
   );
 }
 
-type ExportMode = 'none' | 'action-menu' | 'preview';
+type ExportMode = 'none' | 'action-menu';
 
 function ListApp({
   limit,
@@ -143,8 +142,6 @@ function ListApp({
   // Export state
   const [exportMode, setExportMode] = useState<ExportMode>('none');
   const [exportActionIndex, setExportActionIndex] = useState(0);
-  const [previewContent, setPreviewContent] = useState('');
-  const [previewScrollOffset, setPreviewScrollOffset] = useState(0);
 
   // Status toast
   const [statusMessage, setStatusMessage] = useState('');
@@ -221,22 +218,12 @@ function ListApp({
         setExportActionIndex(0);
         setMultiSelectMode(false);
         setSelectedIds(new Set());
-      } else if (exportActionIndex === 2) {
-        // Show preview (only first conversation)
-        const content = await generatePreviewContent(toExport[0]!);
-        setPreviewContent(content);
-        setPreviewScrollOffset(0);
-        setExportMode('preview');
       }
     } catch (err) {
       showStatus(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
       setExportMode('none');
     }
   }, [getConversationsToExport, exportActionIndex, showStatus]);
-
-  // Preview content height for scrolling
-  const previewContentHeight = height - 5;
-  const previewMaxOffset = getPreviewMaxOffset(previewContent, previewContentHeight);
 
   useInput((input, key) => {
     // Priority 1: Quit
@@ -245,26 +232,10 @@ function ListApp({
       return;
     }
 
-    // Priority 2: Export preview mode
-    if (exportMode === 'preview') {
-      if (input === 'j' || key.downArrow) {
-        setPreviewScrollOffset((o) => Math.min(o + 1, previewMaxOffset));
-      } else if (input === 'k' || key.upArrow) {
-        setPreviewScrollOffset((o) => Math.max(o - 1, 0));
-      } else if (input === 'g') {
-        setPreviewScrollOffset(0);
-      } else if (input === 'G') {
-        setPreviewScrollOffset(previewMaxOffset);
-      } else if (key.escape) {
-        setExportMode('action-menu');
-      }
-      return;
-    }
-
-    // Priority 3: Export action menu
+    // Priority 2: Export action menu
     if (exportMode === 'action-menu') {
       if (input === 'j' || key.downArrow) {
-        setExportActionIndex((i) => Math.min(i + 1, 2));
+        setExportActionIndex((i) => Math.min(i + 1, 1)); // Only 2 options (0-1)
       } else if (input === 'k' || key.upArrow) {
         setExportActionIndex((i) => Math.max(i - 1, 0));
       } else if (key.return) {
@@ -432,17 +403,6 @@ function ListApp({
         <ExportActionMenu
           selectedIndex={exportActionIndex}
           conversationCount={getConversationsToExport().length}
-          width={width}
-          height={height}
-        />
-      )}
-
-      {/* Export preview overlay */}
-      {exportMode === 'preview' && (
-        <ExportPreviewModal
-          content={previewContent}
-          title={getConversationsToExport()[0]?.title ?? 'Preview'}
-          scrollOffset={previewScrollOffset}
           width={width}
           height={height}
         />
