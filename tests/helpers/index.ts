@@ -8,4 +8,5 @@ export * from './cli';
 export * from './assertions';
 export * from './time';
 export * from './sources';
+export * from './mocks';
 

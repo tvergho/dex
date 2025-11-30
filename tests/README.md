@@ -43,7 +43,9 @@ tests/
 ├── unit/               # Unit tests (pure functions)
 │   ├── utils/
 │   │   ├── export.test.ts
-│   │   └── format.test.ts
+│   │   ├── format.test.ts
+│   │   ├── config.test.ts
+│   │   └── platform.test.ts
 │   ├── db/
 │   │   ├── repository.test.ts
 │   │   └── analytics.test.ts
@@ -58,7 +60,8 @@ tests/
 │       ├── backup.test.ts
 │       ├── import.test.ts
 │       ├── list.test.ts
-│       └── show.test.ts
+│       ├── show.test.ts
+│       └── sync.test.ts
 └── README.md           # This file
 ```
 
