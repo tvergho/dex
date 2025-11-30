@@ -12,7 +12,7 @@ import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index';
 import { messageRepo, filesRepo, messageFilesRepo, conversationRepo } from '../../db/repository';
-import { ExportActionMenu, ExportPreviewModal, StatusToast, getPreviewMaxOffset } from '../components/index';
+import { ExportActionMenu, ExportPreviewModal, StatusToast, getPreviewMaxOffset, getSourceColor } from '../components/index';
 import {
   exportConversationsToFile,
   exportConversationsToClipboard,
@@ -106,16 +106,6 @@ function formatRelativeTime(dateStr: string): string {
   return `${Math.floor(diffDays / 7)}w ago`;
 }
 
-/**
- * Get source color for display
- */
-function getSourceColor(source: string): string {
-  if (source === 'cursor') return 'cyan';
-  if (source === 'claude-code') return 'magenta';
-  if (source === 'opencode') return 'green';
-  if (source === 'codex') return 'yellow';
-  return 'white'; // unknown sources
-}
 
 type FocusSection = 'recent' | 'top' | 'projects' | 'files' | null;
 

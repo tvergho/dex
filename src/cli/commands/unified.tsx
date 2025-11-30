@@ -23,11 +23,12 @@ import {
   MatchesView,
   ConversationView,
   MessageDetailView,
+  SelectionIndicator,
+  SourceBadge,
   type SyncStatus,
 } from '../components/index';
 import {
   formatRelativeTime,
-  formatSourceName,
   truncatePath,
   formatTokenPair,
   getLineCountParts,
@@ -51,32 +52,25 @@ function ConversationListItem({
   conversation,
   isSelected,
   width,
-  index,
 }: {
   conversation: Conversation;
   isSelected: boolean;
   width: number;
-  index: number;
 }) {
   const timeStr = formatRelativeTime(conversation.updatedAt);
-  const msgStr = `${conversation.messageCount} msg${conversation.messageCount !== 1 ? 's' : ''}`;
-  const sourceName = formatSourceName(conversation.source);
+  const msgCount = conversation.messageCount;
 
   // Calculate available width for title
-  const metaStr = ` · ${msgStr} · ${timeStr}`;
-  const prefixWidth = 4; // "▸ " or "  "
-  const maxTitleWidth = Math.max(20, width - prefixWidth - metaStr.length - 2);
+  // Format: [sel] Title                              time
+  const prefixWidth = 3; // "▸ " or "  "
+  const timeWidth = timeStr.length + 2;
+  const maxTitleWidth = Math.max(20, width - prefixWidth - timeWidth - 4);
 
   const title = conversation.title.length > maxTitleWidth
     ? conversation.title.slice(0, maxTitleWidth - 1) + '…'
     : conversation.title;
 
-  // Path and stats for second line
-  const maxPathWidth = Math.max(20, width - sourceName.length - 20);
-  const displayPath = conversation.workspacePath
-    ? truncatePath(conversation.workspacePath, maxPathWidth)
-    : '—';
-
+  // Secondary info: source badge + message count + optional stats
   const tokenStr = formatTokenPair(
     conversation.totalInputTokens,
     conversation.totalOutputTokens,
@@ -90,24 +84,21 @@ function ConversationListItem({
 
   return (
     <Box flexDirection="column">
-      {/* Title line */}
+      {/* Row 1: Selection + Title + Time (right-aligned feel) */}
       <Box>
-        <Text color={isSelected ? 'cyan' : 'gray'}>{isSelected ? ' ▸ ' : '   '}</Text>
+        <SelectionIndicator isSelected={isSelected} />
         <Text color={isSelected ? 'cyan' : 'white'} bold={isSelected}>
           {title}
         </Text>
-        <Text color="gray"> · {msgStr} · {timeStr}</Text>
+        <Box flexGrow={1} />
+        <Text color="gray">{timeStr}</Text>
       </Box>
-      {/* Details line - always present for consistent height */}
-      <Box marginLeft={4}>
-        <Text color="yellow">{sourceName}</Text>
-        <Text color="gray"> · </Text>
-        <Text color="magenta">{displayPath}</Text>
+      {/* Row 2: Source badge + message count + stats */}
+      <Box marginLeft={3}>
+        <SourceBadge source={conversation.source} />
+        <Text color="gray"> · {msgCount} msgs</Text>
         {tokenStr && (
-          <>
-            <Text color="gray"> · </Text>
-            <Text color="gray">{tokenStr}</Text>
-          </>
+          <Text color="gray"> · {tokenStr}</Text>
         )}
         {lineParts && (
           <>
@@ -385,10 +376,10 @@ function UnifiedApp() {
 
   const expandedResult = expandedIndex !== null ? displayItems[expandedIndex] : null;
 
-  // Layout calculations - each row is exactly 2 lines
+  // Layout calculations - each row is 2 lines content + 1 line separator = 3 lines
   const headerHeight = 3;
   const footerHeight = 2;
-  const rowHeight = 2; // Fixed 2 lines per row for consistent spacing
+  const rowHeight = 3; // 2 lines content + 1 line separator
   const availableHeight = height - headerHeight - footerHeight;
   const visibleCount = Math.max(1, Math.floor(availableHeight / rowHeight));
 
@@ -754,18 +745,22 @@ function UnifiedApp() {
             );
           })
         ) : (
-          // List view - using new consistent component
+          // List view - using new consistent component with separators
           visibleItems.map((item, idx) => {
             const actualIndex = scrollOffset + idx;
             if (!item?.conversation) return null;
+            const isLast = idx === visibleItems.length - 1;
             return (
-              <ConversationListItem
-                key={item.conversation.id}
-                conversation={item.conversation}
-                isSelected={actualIndex === selectedIndex}
-                width={width - 2}
-                index={actualIndex}
-              />
+              <Box key={item.conversation.id} flexDirection="column">
+                <ConversationListItem
+                  conversation={item.conversation}
+                  isSelected={actualIndex === selectedIndex}
+                  width={width - 2}
+                />
+                {!isLast && (
+                  <Box height={1} />
+                )}
+              </Box>
             );
           })
         )}

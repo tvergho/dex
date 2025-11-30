@@ -41,11 +41,18 @@ tests/
 │   ├── assertions.ts   # Custom file/directory assertions
 │   └── time.ts         # Date/time utilities
 ├── unit/               # Unit tests (pure functions)
-│   └── utils/
-│       └── export.test.ts
+│   ├── utils/
+│   │   └── export.test.ts
+│   └── adapters/
+│       ├── claude-code.test.ts
+│       ├── codex.test.ts
+│       ├── opencode.test.ts
+│       └── cursor.node-test.ts  # Runs with Node.js
 ├── integration/        # Integration tests (with I/O)
 │   └── commands/
-│       └── export.test.ts
+│       ├── export.test.ts
+│       ├── backup.test.ts
+│       └── import.test.ts
 └── README.md           # This file
 ```
 
@@ -210,7 +217,18 @@ bun run test:cursor
 bun run test:all
 ```
 
-The Cursor tests in `cursor.test.ts` are skipped in `bun test`. Instead, a Node.js
-compatible version exists in `cursor.node.test.ts` that runs with Node's native
-test runner via tsx.
+The Cursor tests exist in `cursor.node-test.ts` (note the hyphen) to prevent Bun
+from attempting to run them. They run with Node's native test runner via tsx.
+
+### LanceDB Delete Operations
+
+LanceDB has a known issue where delete operations on tables with vector columns
+may not reliably remove rows. This affects the `--force` flag in `dex import`,
+which attempts to delete existing conversations before re-importing. The delete
+operation returns successfully but rows may persist.
+
+For full overwrites, consider deleting the database and re-syncing instead:
+```bash
+rm -rf ~/.dex/lancedb && dex sync --force
+```
 

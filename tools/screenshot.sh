@@ -102,18 +102,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [ -z "$COMMAND" ]; then
-    echo "Usage: $0 <command> [options]"
-    echo ""
-    echo "Examples:"
-    echo "  $0 \"search test\"                    # Screenshot search results"
-    echo "  $0 \"search api\" -k enter            # Screenshot matches view"
-    echo "  $0 \"search api\" -k enter,enter      # Screenshot conversation view"
-    echo "  $0 \"list\" -o list.png               # Custom output path"
-    echo ""
-    echo "Use -h or --help for full options"
-    exit 1
-fi
+# Empty command is allowed - runs unified view
+# if [ -z "$COMMAND" ]; then
+#     echo "Usage: $0 <command> [options]"
+#     exit 1
+# fi
 
 # Check for vhs
 if ! command -v vhs &> /dev/null; then

@@ -95,28 +95,28 @@ async function ensureTables(): Promise<void> {
   const existingTables = await db.tableNames();
 
   // Conversations table
-  // Use empty strings for nullable fields to establish schema types
+  // Note: All column names use snake_case to ensure LanceDB SQL compatibility
   if (!existingTables.includes('conversations')) {
     conversationsTable = await db.createTable('conversations', [
       {
         id: '_placeholder_',
         source: 'cursor',
         title: '',
-        subtitle: '',           // Empty string instead of null
-        workspacePath: '',      // Empty string instead of null
-        projectName: '',        // Empty string instead of null
-        model: '',              // Empty string instead of null
-        mode: '',               // Empty string instead of null
-        createdAt: '',          // Empty string instead of null
-        updatedAt: '',          // Empty string instead of null
-        messageCount: 0,
-        sourceRefJson: '{}',
-        totalInputTokens: 0,
-        totalOutputTokens: 0,
-        totalCacheCreationTokens: 0,
-        totalCacheReadTokens: 0,
-        totalLinesAdded: 0,
-        totalLinesRemoved: 0,
+        subtitle: '',
+        workspace_path: '',
+        project_name: '',
+        model: '',
+        mode: '',
+        created_at: '',
+        updated_at: '',
+        message_count: 0,
+        source_ref_json: '{}',
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        total_cache_creation_tokens: 0,
+        total_cache_read_tokens: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
       },
     ]);
     // Delete placeholder row
@@ -130,18 +130,18 @@ async function ensureTables(): Promise<void> {
     messagesTable = await db.createTable('messages', [
       {
         id: '_placeholder_',
-        conversationId: '',
+        conversation_id: '',
         role: 'user',
         content: '',
-        timestamp: '',          // Empty string instead of null
-        messageIndex: 0,
-        vector: new Array(EMBEDDING_DIMENSIONS).fill(0), // Vector embeddings for hybrid search
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-        totalLinesAdded: 0,
-        totalLinesRemoved: 0,
+        timestamp: '',
+        message_index: 0,
+        vector: new Array(EMBEDDING_DIMENSIONS).fill(0),
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_tokens: 0,
+        cache_read_tokens: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
       },
     ]);
     await messagesTable.delete("id = '_placeholder_'");
@@ -155,12 +155,12 @@ async function ensureTables(): Promise<void> {
     toolCallsTable = await db.createTable('tool_calls', [
       {
         id: '_placeholder_',
-        messageId: '',
-        conversationId: '',
+        message_id: '',
+        conversation_id: '',
         type: '',
         input: '',
-        output: '',             // Empty string instead of null
-        filePath: '',           // Empty string instead of null
+        output: '',
+        file_path: '',
       },
     ]);
     await toolCallsTable.delete("id = '_placeholder_'");
@@ -173,13 +173,13 @@ async function ensureTables(): Promise<void> {
     syncStateTable = await db.createTable('sync_state', [
       {
         source: 'cursor',
-        workspacePath: '_placeholder_',
-        dbPath: '',
-        lastSyncedAt: new Date().toISOString(),
-        lastMtime: 0,
+        workspace_path: '_placeholder_',
+        db_path: '',
+        last_synced_at: new Date().toISOString(),
+        last_mtime: 0,
       },
     ]);
-    await syncStateTable.delete(`"workspacePath" = '_placeholder_'`);
+    await syncStateTable.delete("workspace_path = '_placeholder_'");
   } else {
     syncStateTable = await db.openTable('sync_state');
   }
@@ -189,8 +189,8 @@ async function ensureTables(): Promise<void> {
     filesTable = await db.createTable('conversation_files', [
       {
         id: '_placeholder_',
-        conversationId: '',
-        filePath: '',
+        conversation_id: '',
+        file_path: '',
         role: 'context',
       },
     ]);
@@ -204,9 +204,9 @@ async function ensureTables(): Promise<void> {
     messageFilesTable = await db.createTable('message_files', [
       {
         id: '_placeholder_',
-        messageId: '',
-        conversationId: '',
-        filePath: '',
+        message_id: '',
+        conversation_id: '',
+        file_path: '',
         role: 'context',
       },
     ]);
@@ -220,14 +220,14 @@ async function ensureTables(): Promise<void> {
     fileEditsTable = await db.createTable('file_edits', [
       {
         id: '_placeholder_',
-        messageId: '',
-        conversationId: '',
-        filePath: '',
-        editType: 'modify',
-        linesAdded: 0,
-        linesRemoved: 0,
-        startLine: 0,  // 0 = not available
-        endLine: 0,    // 0 = not available
+        message_id: '',
+        conversation_id: '',
+        file_path: '',
+        edit_type: 'modify',
+        lines_added: 0,
+        lines_removed: 0,
+        start_line: 0,
+        end_line: 0,
       },
     ]);
     await fileEditsTable.delete("id = '_placeholder_'");
@@ -306,18 +306,18 @@ export async function recreateMessagesTable(): Promise<void> {
   messagesTable = await db!.createTable('messages', [
     {
       id: '_placeholder_',
-      conversationId: '',
+      conversation_id: '',
       role: 'user',
       content: '',
       timestamp: '',
-      messageIndex: 0,
+      message_index: 0,
       vector: new Array(EMBEDDING_DIMENSIONS).fill(0),
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheCreationTokens: 0,
-      cacheReadTokens: 0,
-      totalLinesAdded: 0,
-      totalLinesRemoved: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_tokens: 0,
+      cache_read_tokens: 0,
+      total_lines_added: 0,
+      total_lines_removed: 0,
     },
   ]);
   await messagesTable.delete("id = '_placeholder_'");
