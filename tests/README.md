@@ -49,6 +49,8 @@ tests/
 │   ├── db/
 │   │   ├── repository.test.ts
 │   │   └── analytics.test.ts
+│   ├── schema/
+│   │   └── index.test.ts
 │   └── adapters/
 │       ├── claude-code.test.ts
 │       ├── codex.test.ts
@@ -61,7 +63,8 @@ tests/
 │       ├── import.test.ts
 │       ├── list.test.ts
 │       ├── show.test.ts
-│       └── sync.test.ts
+│       ├── sync.test.ts
+│       └── status.test.ts
 └── README.md           # This file
 ```
 

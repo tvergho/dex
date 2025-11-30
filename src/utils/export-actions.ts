@@ -85,17 +85,3 @@ export async function exportConversationsToClipboard(
   const fullContent = markdownParts.join('\n\n---\n\n');
   await copyToClipboard(fullContent);
 }
-
-/**
- * Generate markdown preview content for a single conversation
- */
-export async function generatePreviewContent(
-  conversation: Conversation
-): Promise<string> {
-  await connect();
-
-  const messages = await messageRepo.findByConversation(conversation.id);
-  const files = await filesRepo.findByConversation(conversation.id);
-
-  return conversationToMarkdown(conversation, messages, files);
-}

@@ -12,11 +12,10 @@ import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index';
 import { messageRepo, filesRepo, messageFilesRepo, conversationRepo } from '../../db/repository';
-import { ExportActionMenu, ExportPreviewModal, StatusToast, getPreviewMaxOffset, getSourceColor } from '../components/index';
+import { ExportActionMenu, StatusToast, getSourceColor } from '../components/index';
 import {
   exportConversationsToFile,
   exportConversationsToClipboard,
-  generatePreviewContent,
 } from '../../utils/export-actions';
 import {
   createPeriodFilter,
@@ -898,11 +897,9 @@ function StatsApp({ period }: { period: number }) {
   const [projectSelectedIndex, setProjectSelectedIndex] = useState(0);
 
   // Export state
-  type ExportMode = 'none' | 'action-menu' | 'preview';
+  type ExportMode = 'none' | 'action-menu';
   const [exportMode, setExportMode] = useState<ExportMode>('none');
   const [exportActionIndex, setExportActionIndex] = useState(0);
-  const [previewContent, setPreviewContent] = useState('');
-  const [previewScrollOffset, setPreviewScrollOffset] = useState(0);
 
   // Status toast
   const [statusMessage, setStatusMessage] = useState('');
@@ -1071,22 +1068,12 @@ function StatsApp({ period }: { period: number }) {
         showStatus('Copied to clipboard', 'success');
         setExportMode('none');
         setExportActionIndex(0);
-      } else if (exportActionIndex === 2) {
-        // Show preview
-        const content = await generatePreviewContent(conv);
-        setPreviewContent(content);
-        setPreviewScrollOffset(0);
-        setExportMode('preview');
       }
     } catch (err) {
       showStatus(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
       setExportMode('none');
     }
   }, [getCurrentConversation, exportActionIndex, showStatus]);
-
-  // Preview content height for scrolling
-  const previewContentHeight = height - 5;
-  const previewMaxOffset = getPreviewMaxOffset(previewContent, previewContentHeight);
 
   // Handle Enter key to view selected conversation or drill down
   async function handleEnterKey() {
@@ -1122,26 +1109,10 @@ function StatsApp({ period }: { period: number }) {
       return;
     }
 
-    // Priority 2: Export preview mode
-    if (exportMode === 'preview') {
-      if (input === 'j' || key.downArrow) {
-        setPreviewScrollOffset((o) => Math.min(o + 1, previewMaxOffset));
-      } else if (input === 'k' || key.upArrow) {
-        setPreviewScrollOffset((o) => Math.max(o - 1, 0));
-      } else if (input === 'g') {
-        setPreviewScrollOffset(0);
-      } else if (input === 'G') {
-        setPreviewScrollOffset(previewMaxOffset);
-      } else if (key.escape) {
-        setExportMode('action-menu');
-      }
-      return;
-    }
-
-    // Priority 3: Export action menu
+    // Priority 2: Export action menu
     if (exportMode === 'action-menu') {
       if (input === 'j' || key.downArrow) {
-        setExportActionIndex((i) => Math.min(i + 1, 2));
+        setExportActionIndex((i) => Math.min(i + 1, 1)); // Only 2 options (0-1)
       } else if (input === 'k' || key.upArrow) {
         setExportActionIndex((i) => Math.max(i - 1, 0));
       } else if (key.return) {
@@ -1522,17 +1493,6 @@ function StatsApp({ period }: { period: number }) {
           />
         )}
 
-        {/* Export preview overlay */}
-        {exportMode === 'preview' && (
-          <ExportPreviewModal
-            content={previewContent}
-            title={selectedConversation.title}
-            scrollOffset={previewScrollOffset}
-            width={width}
-            height={height}
-          />
-        )}
-
         {/* Status toast */}
         {statusVisible && (
           <StatusToast
@@ -1595,17 +1555,6 @@ function StatsApp({ period }: { period: number }) {
           <ExportActionMenu
             selectedIndex={exportActionIndex}
             conversationCount={1}
-            width={width}
-            height={height}
-          />
-        )}
-
-        {/* Export preview overlay */}
-        {exportMode === 'preview' && projectConversations[projectSelectedIndex] && (
-          <ExportPreviewModal
-            content={previewContent}
-            title={projectConversations[projectSelectedIndex]!.title}
-            scrollOffset={previewScrollOffset}
             width={width}
             height={height}
           />
@@ -1738,17 +1687,6 @@ function StatsApp({ period }: { period: number }) {
         <ExportActionMenu
           selectedIndex={exportActionIndex}
           conversationCount={1}
-          width={width}
-          height={height}
-        />
-      )}
-
-      {/* Export preview overlay */}
-      {exportMode === 'preview' && (
-        <ExportPreviewModal
-          content={previewContent}
-          title="Preview"
-          scrollOffset={previewScrollOffset}
           width={width}
           height={height}
         />
