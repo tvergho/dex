@@ -189,3 +189,18 @@ const count = await countFilesWithExtension('/dir', '.md');
 4. **Mock external calls** - Use CLI helpers to capture output
 5. **Test edge cases** - Empty data, invalid inputs, boundary conditions
 
+## Known Limitations
+
+### Cursor Adapter Tests
+
+The Cursor adapter tests are currently **skipped** because the Cursor parser uses
+`better-sqlite3` which has compatibility issues with Bun's test runner. The native
+bindings don't load properly in Bun's test context.
+
+The mock SQLite helpers in `tests/helpers/sources.ts` use `bun:sqlite` which works
+for creating test databases, but the parser itself uses `better-sqlite3`.
+
+To test Cursor functionality:
+- Run the main app which uses better-sqlite3 correctly: `bun run dev sync`
+- Or manually test with tsx: `npx tsx tests/unit/adapters/cursor.test.ts`
+

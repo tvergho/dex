@@ -182,16 +182,18 @@ export async function createOpenCodeStorage(
   return { storagePath, sessionFile, messageDir };
 }
 
-// ============ Cursor Mock Data (SQLite is more complex) ============
+// ============ Cursor Mock Data (SQLite) ============
 
-// For Cursor, we'll test the parser functions directly with mock data
-// rather than creating a full SQLite database
+import { Database } from 'bun:sqlite';
 
 export interface MockCursorBubble {
   bubbleId: string;
   type: number; // 1 = user, 2 = assistant
   text: string;
   relevantFiles?: string[];
+  context?: {
+    fileSelections?: Array<{ uri?: { fsPath?: string } }>;
+  };
   tokenCount?: {
     inputTokens?: number;
     outputTokens?: number;
@@ -204,6 +206,9 @@ export interface MockCursorComposerData {
   createdAt?: number;
   lastUpdatedAt?: number;
   forceMode?: string;
+  modelConfig?: {
+    modelName?: string;
+  };
   conversation?: MockCursorBubble[];
   conversationMap?: Record<string, MockCursorBubble>;
   fullConversationHeadersOnly?: Array<{ bubbleId: string; type?: number }>;
@@ -213,26 +218,168 @@ export interface MockCursorComposerData {
   codeBlockData?: Record<string, Record<string, { diffId?: string; uri?: { fsPath?: string }; bubbleId?: string }>>;
 }
 
-// Helper to create a minimal conversation entry for testing
+export interface MockCursorCodeBlockDiff {
+  diffId: string;
+  composerId: string;
+  newModelDiffWrtV0?: Array<{
+    original: { startLineNumber: number; endLineNumberExclusive: number };
+    modified: string[];
+  }>;
+}
+
+/**
+ * Create a mock Cursor SQLite database with test data
+ * Uses bun:sqlite for test compatibility
+ */
+export async function createCursorDatabase(
+  dbPath: string,
+  data: {
+    conversations: MockCursorComposerData[];
+    separateBubbles?: Array<{ composerId: string; bubble: MockCursorBubble }>;
+    codeBlockDiffs?: MockCursorCodeBlockDiff[];
+  }
+): Promise<void> {
+  const db = new Database(dbPath);
+
+  // Create the cursorDiskKV table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cursorDiskKV (
+      key TEXT PRIMARY KEY,
+      value BLOB
+    )
+  `);
+
+  const insert = db.prepare('INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)');
+
+  // Insert composer data
+  for (const conv of data.conversations) {
+    const key = `composerData:${conv.composerId}`;
+    const value = JSON.stringify(conv);
+    insert.run(key, value);
+  }
+
+  // Insert separate bubble entries (for v9+ format)
+  if (data.separateBubbles) {
+    for (const { composerId, bubble } of data.separateBubbles) {
+      const key = `bubbleId:${composerId}:${bubble.bubbleId}`;
+      const value = JSON.stringify(bubble);
+      insert.run(key, value);
+    }
+  }
+
+  // Insert code block diffs
+  if (data.codeBlockDiffs) {
+    for (const diff of data.codeBlockDiffs) {
+      const key = `codeBlockDiff:${diff.composerId}:${diff.diffId}`;
+      const value = JSON.stringify({ newModelDiffWrtV0: diff.newModelDiffWrtV0 });
+      insert.run(key, value);
+    }
+  }
+
+  db.close();
+}
+
+/**
+ * Helper to create a minimal conversation entry for testing
+ */
 export function createMockCursorConversation(
   composerId: string,
   bubbles: MockCursorBubble[],
   options: {
     name?: string;
     forceMode?: string;
+    modelName?: string;
     fileSelections?: string[];
+    createdAt?: number;
+    lastUpdatedAt?: number;
   } = {}
 ): MockCursorComposerData {
   return {
     composerId,
     name: options.name ?? 'Test Conversation',
-    createdAt: Date.now() - 3600000, // 1 hour ago
-    lastUpdatedAt: Date.now(),
+    createdAt: options.createdAt ?? Date.now() - 3600000, // 1 hour ago
+    lastUpdatedAt: options.lastUpdatedAt ?? Date.now(),
     forceMode: options.forceMode,
+    modelConfig: options.modelName ? { modelName: options.modelName } : undefined,
     conversation: bubbles,
     context: options.fileSelections
       ? { fileSelections: options.fileSelections.map((p) => ({ uri: { fsPath: p } })) }
       : undefined,
+  };
+}
+
+/**
+ * Helper to create a conversation using the conversationMap format (newer)
+ */
+export function createMockCursorConversationMap(
+  composerId: string,
+  bubbles: MockCursorBubble[],
+  options: {
+    name?: string;
+    forceMode?: string;
+    modelName?: string;
+    fileSelections?: string[];
+  } = {}
+): MockCursorComposerData {
+  const conversationMap: Record<string, MockCursorBubble> = {};
+  const fullConversationHeadersOnly: Array<{ bubbleId: string; type?: number }> = [];
+
+  for (const bubble of bubbles) {
+    conversationMap[bubble.bubbleId] = bubble;
+    fullConversationHeadersOnly.push({ bubbleId: bubble.bubbleId, type: bubble.type });
+  }
+
+  return {
+    composerId,
+    name: options.name ?? 'Test Conversation',
+    createdAt: Date.now() - 3600000,
+    lastUpdatedAt: Date.now(),
+    forceMode: options.forceMode,
+    modelConfig: options.modelName ? { modelName: options.modelName } : undefined,
+    conversationMap,
+    fullConversationHeadersOnly,
+    context: options.fileSelections
+      ? { fileSelections: options.fileSelections.map((p) => ({ uri: { fsPath: p } })) }
+      : undefined,
+  };
+}
+
+/**
+ * Helper to create a conversation using the separate bubbleId entries (v9+ format)
+ */
+export function createMockCursorConversationV9(
+  composerId: string,
+  bubbles: MockCursorBubble[],
+  options: {
+    name?: string;
+    forceMode?: string;
+    modelName?: string;
+  } = {}
+): {
+  conversation: MockCursorComposerData;
+  separateBubbles: Array<{ composerId: string; bubble: MockCursorBubble }>;
+} {
+  const fullConversationHeadersOnly: Array<{ bubbleId: string; type?: number }> = [];
+  const separateBubbles: Array<{ composerId: string; bubble: MockCursorBubble }> = [];
+
+  for (const bubble of bubbles) {
+    fullConversationHeadersOnly.push({ bubbleId: bubble.bubbleId, type: bubble.type });
+    separateBubbles.push({ composerId, bubble });
+  }
+
+  return {
+    conversation: {
+      composerId,
+      name: options.name ?? 'Test Conversation',
+      createdAt: Date.now() - 3600000,
+      lastUpdatedAt: Date.now(),
+      forceMode: options.forceMode,
+      modelConfig: options.modelName ? { modelName: options.modelName } : undefined,
+      fullConversationHeadersOnly,
+      // Empty conversationMap to trigger v9 format parsing
+      conversationMap: {},
+    },
+    separateBubbles,
   };
 }
 
@@ -242,6 +389,7 @@ export function createMockCursorBubble(
   options: {
     bubbleId?: string;
     relevantFiles?: string[];
+    fileSelections?: string[];
     inputTokens?: number;
     outputTokens?: number;
   } = {}
@@ -251,6 +399,9 @@ export function createMockCursorBubble(
     type: type === 'user' ? 1 : 2,
     text,
     relevantFiles: options.relevantFiles,
+    context: options.fileSelections
+      ? { fileSelections: options.fileSelections.map((p) => ({ uri: { fsPath: p } })) }
+      : undefined,
     tokenCount:
       options.inputTokens || options.outputTokens
         ? { inputTokens: options.inputTokens, outputTokens: options.outputTokens }
