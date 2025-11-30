@@ -16,7 +16,7 @@ import { mkdir, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { connect } from '../../db/index';
-import { conversationRepo, messageRepo, filesRepo } from '../../db/repository';
+import { conversationRepo, messageRepo, filesRepo, toolCallRepo, fileEditsRepo } from '../../db/repository';
 import {
   generateFilename,
   getProjectName,
@@ -104,12 +104,14 @@ export async function exportCommand(options: ExportOptions): Promise<void> {
         filePath = join(subDir, filename);
       }
 
-      // Fetch messages and files for this conversation
+      // Fetch messages, files, tool calls, and file edits for this conversation
       const messages = await messageRepo.findByConversation(conv.id);
       const files = await filesRepo.findByConversation(conv.id);
+      const toolCalls = await toolCallRepo.findByConversation(conv.id);
+      const fileEdits = await fileEditsRepo.findByConversation(conv.id);
 
       // Generate markdown content
-      const markdown = conversationToMarkdown(conv, messages, files);
+      const markdown = conversationToMarkdown(conv, messages, files, toolCalls, fileEdits);
 
       // Write file
       await writeFile(filePath, markdown, 'utf-8');

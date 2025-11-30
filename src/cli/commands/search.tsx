@@ -407,6 +407,8 @@ function SearchApp({
           <MessageDetailView
             message={navState.combinedMessages[navState.selectedMessageIndex]!}
             messageFiles={navState.conversationMessageFiles}
+            toolCalls={navState.conversationToolCalls}
+            fileEdits={navState.conversationFileEdits}
             width={width - 2}
             height={availableHeight}
             scrollOffset={navState.messageScrollOffset}

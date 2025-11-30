@@ -2,8 +2,8 @@
  * Export utilities for formatting conversations as markdown
  */
 
-import type { Conversation, Message, ConversationFile } from '../schema/index';
-import { combineConsecutiveMessages } from './format';
+import type { Conversation, Message, ConversationFile, ToolCall, FileEdit } from '../schema/index';
+import { combineConsecutiveMessages, getFileName } from './format';
 
 /**
  * Generate a safe filename from conversation title and date
@@ -50,7 +50,9 @@ export function getProjectName(workspacePath: string | undefined): string {
 export function conversationToMarkdown(
   conv: Conversation,
   messages: Message[],
-  files: ConversationFile[]
+  files: ConversationFile[],
+  toolCalls: ToolCall[] = [],
+  fileEdits: FileEdit[] = []
 ): string {
   const lines: string[] = [];
 
@@ -120,6 +122,41 @@ export function conversationToMarkdown(
     lines.push(`## ${roleLabel}`);
     lines.push('');
     lines.push(msg.content);
+
+    // Add tool outputs for assistant messages
+    if (msg.role === 'assistant') {
+      const msgToolCalls = toolCalls.filter(
+        (tc) => msg.messageIds.includes(tc.messageId) && tc.output
+      );
+      const msgFileEdits = fileEdits.filter(
+        (fe) => msg.messageIds.includes(fe.messageId) && fe.newContent
+      );
+
+      if (msgToolCalls.length > 0 || msgFileEdits.length > 0) {
+        lines.push('');
+        lines.push('### Tool Outputs');
+        lines.push('');
+
+        for (const tc of msgToolCalls) {
+          const fileName = tc.filePath ? getFileName(tc.filePath) : '';
+          lines.push(`**${tc.type}**${fileName ? ` \`${fileName}\`` : ''}`);
+          lines.push('```');
+          lines.push(tc.output!);
+          lines.push('```');
+          lines.push('');
+        }
+
+        for (const fe of msgFileEdits) {
+          const fileName = getFileName(fe.filePath);
+          lines.push(`**Edit** \`${fileName}\` (+${fe.linesAdded}/-${fe.linesRemoved})`);
+          lines.push('```');
+          lines.push(fe.newContent!);
+          lines.push('```');
+          lines.push('');
+        }
+      }
+    }
+
     lines.push('');
     lines.push('---');
     lines.push('');

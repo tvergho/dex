@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { messageRepo, filesRepo, messageFilesRepo } from '../../db/repository';
+import { messageRepo, filesRepo, messageFilesRepo, toolCallRepo, fileEditsRepo } from '../../db/repository';
 import {
   combineConsecutiveMessages,
   getRenderedLineCount,
@@ -22,6 +22,8 @@ import type {
   MessageFile,
   ConversationResult,
   MessageMatch,
+  ToolCall,
+  FileEdit,
 } from '../../schema/index';
 
 export type NavigationViewMode = 'list' | 'matches' | 'conversation' | 'message';
@@ -43,6 +45,8 @@ export interface NavigationState {
   messageIndexMap: Map<number, number>;
   conversationFiles: ConversationFile[];
   conversationMessageFiles: MessageFile[];
+  conversationToolCalls: ToolCall[];
+  conversationFileEdits: FileEdit[];
   conversationScrollOffset: number;
   highlightMessageIndex: number | undefined;
   selectedMessageIndex: number;
@@ -148,6 +152,8 @@ export function useNavigation({
   const [messageIndexMap, setMessageIndexMap] = useState<Map<number, number>>(new Map());
   const [conversationFiles, setConversationFiles] = useState<ConversationFile[]>([]);
   const [conversationMessageFiles, setConversationMessageFiles] = useState<MessageFile[]>([]);
+  const [conversationToolCalls, setConversationToolCalls] = useState<ToolCall[]>([]);
+  const [conversationFileEdits, setConversationFileEdits] = useState<FileEdit[]>([]);
   const [conversationScrollOffset, setConversationScrollOffset] = useState(0);
   const [highlightMessageIndex, setHighlightMessageIndex] = useState<number | undefined>(undefined);
   const [selectedMessageIndex, setSelectedMessageIndex] = useState(0);
@@ -165,6 +171,8 @@ export function useNavigation({
       if (conv) {
         filesRepo.findByConversation(conv.id).then(setConversationFiles);
         messageFilesRepo.findByConversation(conv.id).then(setConversationMessageFiles);
+        toolCallRepo.findByConversation(conv.id).then(setConversationToolCalls);
+        fileEditsRepo.findByConversation(conv.id).then(setConversationFileEdits);
         messageRepo.findByConversation(conv.id).then((msgs) => {
           const { messages: combined, indexMap } = combineConsecutiveMessages(msgs);
           setCombinedMessages(combined);
@@ -174,6 +182,8 @@ export function useNavigation({
     } else {
       setConversationFiles([]);
       setConversationMessageFiles([]);
+      setConversationToolCalls([]);
+      setConversationFileEdits([]);
       setCombinedMessages([]);
       setMessageIndexMap(new Map());
     }
@@ -419,6 +429,8 @@ export function useNavigation({
     setMessageIndexMap(new Map());
     setConversationFiles([]);
     setConversationMessageFiles([]);
+    setConversationToolCalls([]);
+    setConversationFileEdits([]);
     setConversationScrollOffset(0);
     setHighlightMessageIndex(undefined);
     setSelectedMessageIndex(0);
@@ -559,6 +571,8 @@ export function useNavigation({
       messageIndexMap,
       conversationFiles,
       conversationMessageFiles,
+      conversationToolCalls,
+      conversationFileEdits,
       conversationScrollOffset,
       highlightMessageIndex,
       selectedMessageIndex,

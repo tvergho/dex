@@ -347,6 +347,7 @@ async function ensureTables(): Promise<void> {
         lines_removed: 0,
         start_line: 0,
         end_line: 0,
+        new_content: '',
       },
     ]);
     await fileEditsTable.delete("id = '_placeholder_'");

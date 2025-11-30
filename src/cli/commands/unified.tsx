@@ -12,12 +12,72 @@
  * - q to quit
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
+import { spawn } from 'child_process';
 import { connect } from '../../db/index';
 import { conversationRepo, search } from '../../db/repository';
 import { runSync, type SyncProgress } from './sync';
+import { getLanceDBPath } from '../../utils/config';
+
+// Get count via child process to avoid blocking UI
+function getCountInBackground(): Promise<number> {
+  return new Promise((resolve) => {
+    const dbPath = getLanceDBPath();
+    const script = `
+import * as lancedb from '@lancedb/lancedb';
+try {
+  const db = await lancedb.connect('${dbPath}');
+  const tables = await db.tableNames();
+  if (tables.includes('conversations')) {
+    const table = await db.openTable('conversations');
+    const count = await table.countRows();
+    console.log(count);
+  } else {
+    console.log(0);
+  }
+} catch (e) {
+  console.log(0);
+}
+process.exit(0);
+`;
+
+    let resolved = false;
+    const child = spawn('bun', ['-e', script], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+
+    // Don't let child process keep parent alive
+    child.unref();
+
+    let output = '';
+    child.stdout?.on('data', (data: Buffer) => {
+      output += data.toString();
+    });
+
+    child.on('close', () => {
+      if (resolved) return;
+      resolved = true;
+      const count = parseInt(output.trim(), 10);
+      resolve(isNaN(count) ? 0 : count);
+    });
+
+    child.on('error', () => {
+      if (resolved) return;
+      resolved = true;
+      resolve(0);
+    });
+
+    // Timeout after 5 seconds
+    setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      child.kill();
+      resolve(0);
+    }, 5000);
+  });
+}
 import { StatsContent } from './stats';
 import {
   ResultRow,
@@ -288,56 +348,57 @@ function UnifiedApp() {
     handleExportInput,
   } = useExport({ getConversations: getCurrentConversation });
 
-  // Initialize database and run background sync
-  useEffect(() => {
-    let cancelled = false;
-    let initialCount = 0;
+  // Background sync - runs after DB connection
+  const syncStartedRef = useRef(false);
+  const initStartedRef = useRef(false);
 
-    const initDb = async () => {
-      await connect();
-      if (cancelled) return;
-      setDbReady(true);
+  const startBackgroundSync = useCallback(() => {
+    if (syncStartedRef.current) return;
+    syncStartedRef.current = true;
 
-      const initial = await conversationRepo.list({ limit: 1 });
-      initialCount = initial.length > 0 ? await conversationRepo.count() : 0;
-      if (!cancelled) setConversationCount(initialCount);
-    };
+    setSyncStatus({ phase: 'syncing', message: 'Syncing...' });
 
-    const startBackgroundSync = () => {
-      setSyncStatus({ phase: 'syncing', message: 'Syncing...' });
+    // Capture current count before sync
+    conversationRepo.count().then((initialCount) => {
       runSync({ force: false }, (progress: SyncProgress) => {
-        if (cancelled) return;
         if (progress.phase === 'done') {
           conversationRepo.count().then((newCount) => {
-            if (!cancelled) {
-              const diff = Math.max(0, newCount - initialCount);
-              setConversationCount(newCount);
-              setSyncStatus({ phase: 'done', newConversations: diff });
-            }
+            const diff = Math.max(0, newCount - initialCount);
+            setConversationCount(newCount);
+            setSyncStatus({ phase: 'done', newConversations: diff });
           });
         } else if (progress.phase === 'error') {
-          if (!cancelled) {
-            setSyncStatus({ phase: 'error', message: progress.error || 'Sync failed' });
-          }
+          setSyncStatus({ phase: 'error', message: progress.error || 'Sync failed' });
         }
       }).catch((err) => {
-        if (!cancelled) {
-          setSyncStatus({ phase: 'error', message: err instanceof Error ? err.message : 'Sync failed' });
-        }
+        setSyncStatus({ phase: 'error', message: err instanceof Error ? err.message : 'Sync failed' });
       });
-    };
-
-    setTimeout(() => {
-      if (cancelled) return;
-      initDb().then(() => {
-        if (!cancelled) startBackgroundSync();
-      });
-    }, 0);
-
-    return () => { cancelled = true; };
+    });
   }, []);
 
-  // Load conversations when entering list view
+  // Connect to DB lazily - only when user navigates away from home
+  const ensureDbReady = useCallback(async () => {
+    if (dbReady) return;
+    await connect();
+    setDbReady(true);
+
+    // Get count and start sync after DB is ready
+    const count = await conversationRepo.count();
+    setConversationCount(count);
+    startBackgroundSync();
+  }, [dbReady, startBackgroundSync]);
+
+  // Fetch conversation count on startup (non-blocking child process)
+  useEffect(() => {
+    if (initStartedRef.current) return;
+    initStartedRef.current = true;
+
+    getCountInBackground().then((count) => {
+      setConversationCount(count);
+    });
+  }, []);
+
+  // Load conversations when entering list view (DB should already be ready from goToList)
   useEffect(() => {
     if (unifiedViewMode === 'list' && dbReady && conversations.length === 0 && !searchResults) {
       conversationRepo.list({ limit: 100 }).then(setConversations);
@@ -348,6 +409,7 @@ function UnifiedApp() {
   const executeSearch = useCallback(async (query: string) => {
     if (!query.trim()) return;
     try {
+      await ensureDbReady();
       const results = await search(query, 50);
       setSearchResults(results);
       setUnifiedViewMode('list');
@@ -356,14 +418,15 @@ function UnifiedApp() {
     } catch {
       // Search failed - stay on home
     }
-  }, [navActions]);
+  }, [navActions, ensureDbReady]);
 
   // Go to list view
-  const goToList = useCallback(() => {
+  const goToList = useCallback(async () => {
+    await ensureDbReady();
     setUnifiedViewMode('list');
     navActions.setViewMode('list');
     navActions.setSelectedIndex(0);
-  }, [navActions]);
+  }, [navActions, ensureDbReady]);
 
   // Scroll offset for list view
   const scrollOffset = useMemo(() => {
@@ -527,6 +590,8 @@ function UnifiedApp() {
           <MessageDetailView
             message={navState.combinedMessages[navState.selectedMessageIndex]!}
             messageFiles={navState.conversationMessageFiles}
+            toolCalls={navState.conversationToolCalls}
+            fileEdits={navState.conversationFileEdits}
             width={width - 2}
             height={availableHeight}
             scrollOffset={navState.messageScrollOffset}

@@ -148,6 +148,7 @@ export const FileEdit = z.object({
   linesRemoved: z.number(),
   startLine: z.number().optional(), // Only available for Cursor
   endLine: z.number().optional(), // Only available for Cursor
+  newContent: z.string().optional(), // The new code content from the diff (Cursor only)
 });
 export type FileEdit = z.infer<typeof FileEdit>;
 

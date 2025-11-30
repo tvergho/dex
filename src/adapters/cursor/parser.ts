@@ -25,6 +25,7 @@ export interface RawFileEdit {
   startLine?: number;
   endLine?: number;
   bubbleId?: string; // Associate edit with a specific bubble
+  newContent?: string; // The new code content from the diff
 }
 
 export interface RawConversation {
@@ -369,6 +370,7 @@ function extractCodeBlockDiffs(
             startLine: startLine > 0 ? startLine : undefined,
             endLine: endLine > 0 ? endLine : undefined,
             bubbleId: mapping.bubbleId,
+            newContent: diff.modified?.join('\n'),
           });
         }
       }

@@ -8,15 +8,59 @@ import {
   renderMarkdownContent,
   type CombinedMessage,
 } from '../../utils/format';
-import type { MessageFile } from '../../schema/index';
+import type { MessageFile, ToolCall, FileEdit } from '../../schema/index';
 
 export interface MessageDetailViewProps {
   message: CombinedMessage;
   messageFiles: MessageFile[];
+  toolCalls?: ToolCall[];
+  fileEdits?: FileEdit[];
   width: number;
   height: number;
   scrollOffset: number;
   query: string;
+}
+
+/**
+ * Format tool outputs as markdown for rendering
+ */
+function formatToolOutputs(
+  toolCalls: ToolCall[],
+  fileEdits: FileEdit[],
+  messageIds: string[]
+): string {
+  const msgToolCalls = toolCalls.filter(
+    (tc) => messageIds.includes(tc.messageId) && tc.output
+  );
+  const msgFileEdits = fileEdits.filter(
+    (fe) => messageIds.includes(fe.messageId) && fe.newContent
+  );
+
+  if (msgToolCalls.length === 0 && msgFileEdits.length === 0) {
+    return '';
+  }
+
+  const lines: string[] = ['', '---', '', '### Tool Outputs', ''];
+
+  for (const tc of msgToolCalls) {
+    const fileName = tc.filePath ? getFileName(tc.filePath) : '';
+    lines.push(`**${tc.type}**${fileName ? ` \`${fileName}\`` : ''}`);
+    lines.push('```');
+    lines.push(tc.output!);
+    lines.push('```');
+    lines.push('');
+  }
+
+  for (const fe of msgFileEdits) {
+    const fileName = getFileName(fe.filePath);
+    lines.push(`**Edit** \`${fileName}\` (+${fe.linesAdded}/-${fe.linesRemoved})`);
+    lines.push('```');
+    lines.push(fe.newContent!);
+    lines.push('```');
+    lines.push('');
+  }
+
+  return lines.join('\n');
 }
 
 /**
@@ -26,6 +70,8 @@ export interface MessageDetailViewProps {
 export function MessageDetailView({
   message,
   messageFiles,
+  toolCalls = [],
+  fileEdits = [],
   width,
   height,
   scrollOffset,
@@ -38,10 +84,19 @@ export function MessageDetailView({
     .filter((f) => message.messageIds.includes(f.messageId))
     .map((f) => getFileName(f.filePath));
 
+  // Build full content including tool outputs for assistant messages
+  const fullContent = useMemo(() => {
+    let content = message.content;
+    if (message.role === 'assistant') {
+      content += formatToolOutputs(toolCalls, fileEdits, message.messageIds);
+    }
+    return content;
+  }, [message.content, message.role, message.messageIds, toolCalls, fileEdits]);
+
   // Render markdown to terminal-formatted string using shared function
   const renderedContent = useMemo(() => {
-    return renderMarkdownContent(message.content, width);
-  }, [message.content, width]);
+    return renderMarkdownContent(fullContent, width);
+  }, [fullContent, width]);
 
   // Split rendered content into lines for scrolling
   const lines = renderedContent.split('\n');

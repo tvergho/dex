@@ -833,6 +833,7 @@ export const fileEditsRepo = {
       lines_removed: e.linesRemoved,
       start_line: e.startLine ?? 0,
       end_line: e.endLine ?? 0,
+      new_content: e.newContent ?? '',
     }));
 
     await table.add(rows);
@@ -853,6 +854,7 @@ export const fileEditsRepo = {
       lines_removed: e.linesRemoved,
       start_line: e.startLine ?? 0,
       end_line: e.endLine ?? 0,
+      new_content: e.newContent ?? '',
     }));
 
     await table.add(rows);
@@ -876,6 +878,7 @@ export const fileEditsRepo = {
       linesRemoved: row.lines_removed as number,
       startLine: (row.start_line as number) || undefined,
       endLine: (row.end_line as number) || undefined,
+      newContent: (row.new_content as string) || undefined,
     }));
   },
 
@@ -896,6 +899,7 @@ export const fileEditsRepo = {
       linesRemoved: row.lines_removed as number,
       startLine: (row.start_line as number) || undefined,
       endLine: (row.end_line as number) || undefined,
+      newContent: (row.new_content as string) || undefined,
     }));
   },
 
