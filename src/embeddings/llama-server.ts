@@ -9,9 +9,9 @@ import { spawn, ChildProcess } from 'child_process';
 import { cpus } from 'os';
 import { getDataDir } from '../utils/config';
 
-// Moderate thread count for background work: 25% of cores, minimum 1, max 3
-// Enough for reasonable speed without causing thermal issues
-const LOW_PRIORITY_THREADS = Math.min(3, Math.max(1, Math.floor(cpus().length * 0.25)));
+// Minimal thread count for background work: just 1-2 threads
+// Prioritizes keeping the system cool over embedding speed
+const LOW_PRIORITY_THREADS = Math.min(2, Math.max(1, Math.floor(cpus().length * 0.125)));
 
 // GitHub API for fetching latest release
 const GITHUB_API_LATEST = 'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest';
@@ -259,16 +259,16 @@ export async function startLlamaServer(modelPath: string, threads?: number): Pro
   // Use conservative thread count for background embedding
   const threadCount = threads ?? LOW_PRIORITY_THREADS;
 
-  // Moderate batch sizes - balance speed and thermal impact
+  // Small batch sizes to minimize thermal impact
   const args = [
     '--model', modelPath,
     '--port', String(serverPort),
     '--embedding',
     '--pooling', 'mean',
     '--threads', String(threadCount),
-    '--ctx-size', '4096',
-    '--batch-size', '2048',   // Moderate - allows decent throughput
-    '--ubatch-size', '512',   // Smaller micro-batches to spread work
+    '--ctx-size', '2048',     // Reduced context
+    '--batch-size', '512',    // Small batches
+    '--ubatch-size', '128',   // Tiny micro-batches
   ];
 
   // Start with low priority on Unix

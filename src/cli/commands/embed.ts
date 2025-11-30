@@ -27,12 +27,12 @@ import {
 } from '../../embeddings/llama-server';
 import { existsSync } from 'fs';
 
-// Moderate batch sizes - balance between speed and thermal impact
-const SERVER_BATCH_SIZE = 16;    // Half of original 32
-const FALLBACK_BATCH_SIZE = 8;   // Half of original 16
+// Small batch sizes to minimize CPU heat
+const SERVER_BATCH_SIZE = 8;     // Small batches
+const FALLBACK_BATCH_SIZE = 4;   // Tiny batches for fallback
 
-// Moderate pause between batches - enough to prevent sustained heat buildup
-const BATCH_DELAY_MS = 200;      // 200ms pause between batches
+// Long pause between batches - lets CPU cool down
+const BATCH_DELAY_MS = 1000;     // 1 second pause between batches
 // Instruction prefix for query embeddings
 const INSTRUCTION_PREFIX = 'Instruct: Retrieve relevant code conversations\nQuery: ';
 // Max characters per text (8192 tokens ~ 32K chars, but be conservative)

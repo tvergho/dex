@@ -5,10 +5,10 @@ import { cpus } from 'os';
 import { getDataDir } from '../utils/config';
 
 // Throttling settings for background embedding
-// Use only 25% of CPU cores (minimum 1) to minimize user impact
-const LOW_PRIORITY_THREADS = Math.max(1, Math.floor(cpus().length * 0.25));
-// Small batch size for embedding context
-const EMBEDDING_BATCH_SIZE = 64;
+// Use minimal threads to keep system cool
+const LOW_PRIORITY_THREADS = Math.min(2, Math.max(1, Math.floor(cpus().length * 0.125)));
+// Tiny batch size for embedding context
+const EMBEDDING_BATCH_SIZE = 32;
 
 // Embedding progress state
 export interface EmbeddingProgress {
