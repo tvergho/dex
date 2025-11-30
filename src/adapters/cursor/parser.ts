@@ -125,46 +125,70 @@ function mapBubbleType(type: number | undefined): RawBubble['type'] {
   return 'user';
 }
 
-// Extract workspace path from file paths
+// Extract workspace path from file paths (handles outliers like stdlib paths)
 function extractWorkspacePath(filePaths: string[]): string | undefined {
   if (filePaths.length === 0) return undefined;
 
-  // Only use absolute paths (starting with /) for workspace extraction
   const absolutePaths = filePaths.filter((p) => p.startsWith('/'));
   if (absolutePaths.length === 0) return undefined;
 
-  // Split paths and filter out empty parts (from leading /)
-  const paths = absolutePaths.map((p) => p.split('/').filter(Boolean));
-  const firstPath = paths[0];
-  if (!firstPath || firstPath.length === 0) return undefined;
-
-  const commonParts: string[] = [];
-  for (let i = 0; i < firstPath.length; i++) {
-    const part = firstPath[i];
-    if (part && paths.every((p) => p[i] === part)) {
-      commonParts.push(part);
-    } else {
-      break;
-    }
-  }
-
-  // Try to find a project root (before src, lib, app, etc.)
   const projectIndicators = ['src', 'lib', 'app', 'packages', 'node_modules', 'dist', 'test', 'tests', 'scripts'];
-  const projectIdx = commonParts.findIndex((p) => projectIndicators.includes(p));
-  if (projectIdx > 0) {
-    return '/' + commonParts.slice(0, projectIdx).join('/');
-  }
 
-  // Otherwise return the directory of the file (excluding filename)
-  if (commonParts.length > 1) {
-    const lastPart = commonParts[commonParts.length - 1];
-    if (lastPart && lastPart.includes('.')) {
-      return '/' + commonParts.slice(0, -1).join('/');
+  const deriveFromPaths = (paths: string[]): string | undefined => {
+    const splitPaths = paths
+      .map((p) => p.split('/').filter(Boolean))
+      .filter((parts) => parts.length > 0);
+    if (splitPaths.length === 0) return undefined;
+
+    const firstPath = splitPaths[0];
+    if (!firstPath || firstPath.length === 0) return undefined;
+
+    const commonParts: string[] = [];
+    for (let i = 0; i < firstPath.length; i++) {
+      const part = firstPath[i];
+      if (part && splitPaths.every((p) => p[i] === part)) {
+        commonParts.push(part);
+      } else {
+        break;
+      }
     }
-    return '/' + commonParts.join('/');
+
+    if (commonParts.length === 0) return undefined;
+
+    const projectIdx = commonParts.findIndex((p) => projectIndicators.includes(p));
+    if (projectIdx > 0) {
+      return '/' + commonParts.slice(0, projectIdx).join('/');
+    }
+
+    if (commonParts.length > 1) {
+      const lastPart = commonParts[commonParts.length - 1];
+      if (lastPart && lastPart.includes('.')) {
+        return '/' + commonParts.slice(0, -1).join('/');
+      }
+      return '/' + commonParts.join('/');
+    }
+
+    return undefined;
+  };
+
+  // First try to derive a workspace that fits all absolute paths
+  const fromAll = deriveFromPaths(absolutePaths);
+  if (fromAll) return fromAll;
+
+  // Fallback: score workspaces per path and take the most common/longest
+  const candidateCounts = new Map<string, number>();
+  for (const absPath of absolutePaths) {
+    const candidate = deriveFromPaths([absPath]);
+    if (!candidate) continue;
+    candidateCounts.set(candidate, (candidateCounts.get(candidate) ?? 0) + 1);
   }
 
-  return undefined;
+  if (candidateCounts.size === 0) return undefined;
+
+  const [bestWorkspace] = Array.from(candidateCounts.entries())
+    .sort((a, b) => (b[1] - a[1]) || (b[0].length - a[0].length))[0]!;
+
+  return bestWorkspace;
 }
 
 // Extract project name from workspace path
@@ -181,6 +205,15 @@ function extractBubbleFiles(bubble: BubbleData): RawFile[] {
   // Files from bubble-level context
   if (bubble.context?.fileSelections) {
     for (const selection of bubble.context.fileSelections) {
+      const path = selection.uri?.fsPath || selection.uri?.path;
+      if (path) {
+        filesMap.set(path, { path, role: 'context' });
+      }
+    }
+  }
+
+  if (bubble.context?.folderSelections) {
+    for (const selection of bubble.context.folderSelections) {
       const path = selection.uri?.fsPath || selection.uri?.path;
       if (path) {
         filesMap.set(path, { path, role: 'context' });
@@ -217,6 +250,15 @@ function collectFiles(
     }
   }
 
+  if (context?.folderSelections) {
+    for (const selection of context.folderSelections) {
+      const path = selection.uri?.fsPath || selection.uri?.path;
+      if (path) {
+        filesMap.set(path, { path, role: 'context' });
+      }
+    }
+  }
+
   // From bubbles (relevantFiles and per-bubble context)
   for (const bubble of bubbles) {
     // Relevant files mentioned in a bubble
@@ -231,6 +273,15 @@ function collectFiles(
     // Files from bubble-level context
     if (bubble.context?.fileSelections) {
       for (const selection of bubble.context.fileSelections) {
+        const path = selection.uri?.fsPath || selection.uri?.path;
+        if (path && !filesMap.has(path)) {
+          filesMap.set(path, { path, role: 'context' });
+        }
+      }
+    }
+
+    if (bubble.context?.folderSelections) {
+      for (const selection of bubble.context.folderSelections) {
         const path = selection.uri?.fsPath || selection.uri?.path;
         if (path && !filesMap.has(path)) {
           filesMap.set(path, { path, role: 'context' });
@@ -497,8 +548,11 @@ export function extractConversations(dbPath: string): RawConversation[] {
       // Collect files from context and bubbles
       const files = collectFiles(data.context, bubbleDataList);
 
-      // Extract workspace path from files
-      const filePaths = files.map((f) => f.path);
+      // Extract workspace path from files and edits (ignoring outlier stdlib paths)
+      const filePaths = [
+        ...files.map((f) => f.path),
+        ...allFileEdits.map((edit) => edit.filePath),
+      ];
       const workspacePath = extractWorkspacePath(filePaths);
       const projectName = extractProjectName(workspacePath);
 

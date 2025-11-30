@@ -43,9 +43,12 @@ export class CodexAdapter implements SourceAdapter {
     // Create deterministic ID from source + session ID
     const conversationId = createHash('sha256').update(`codex:${raw.sessionId}`).digest('hex').slice(0, 32);
 
+    const workspacePath = raw.workspacePath || raw.cwd || location.workspacePath;
+    const projectName = raw.projectName || (workspacePath ? workspacePath.split('/').filter(Boolean).pop() : undefined);
+
     const sourceRef: SourceRef = {
       source: 'codex',
-      workspacePath: raw.workspacePath || location.workspacePath,
+      workspacePath,
       originalId: raw.sessionId,
       dbPath: location.dbPath,
     };
@@ -76,8 +79,8 @@ export class CodexAdapter implements SourceAdapter {
       source: 'codex',
       title: raw.title,
       subtitle: raw.gitBranch ? `branch: ${raw.gitBranch}` : undefined,
-      workspacePath: raw.workspacePath || raw.cwd,
-      projectName: (raw.workspacePath || raw.cwd)?.split('/').pop(),
+      workspacePath,
+      projectName,
       model: raw.model,
       mode: 'agent', // Codex CLI is always agent mode
       createdAt,

@@ -119,6 +119,7 @@ export interface RawConversation {
   sessionId: string;
   title: string;
   workspacePath?: string;
+  projectName?: string;
   cwd?: string;
   gitBranch?: string;
   model?: string;
@@ -220,6 +221,76 @@ function getFileRole(toolName: string): RawFile['role'] {
 function countLines(str: string): number {
   if (!str) return 0;
   return str.split('\n').length;
+}
+
+// Extract workspace path from file paths (with fallback for mixed system paths)
+function extractWorkspacePath(filePaths: string[]): string | undefined {
+  if (filePaths.length === 0) return undefined;
+
+  const absolutePaths = filePaths.filter((p) => p.startsWith('/'));
+  if (absolutePaths.length === 0) return undefined;
+
+  const projectIndicators = ['src', 'lib', 'app', 'packages', 'node_modules', 'dist', 'test', 'tests', 'scripts'];
+
+  const deriveFromPaths = (paths: string[]): string | undefined => {
+    const splitPaths = paths
+      .map((p) => p.split('/').filter(Boolean))
+      .filter((parts) => parts.length > 0);
+    if (splitPaths.length === 0) return undefined;
+
+    const firstPath = splitPaths[0];
+    if (!firstPath || firstPath.length === 0) return undefined;
+
+    const commonParts: string[] = [];
+    for (let i = 0; i < firstPath.length; i++) {
+      const part = firstPath[i];
+      if (part && splitPaths.every((p) => p[i] === part)) {
+        commonParts.push(part);
+      } else {
+        break;
+      }
+    }
+
+    if (commonParts.length === 0) return undefined;
+
+    const projectIdx = commonParts.findIndex((p) => projectIndicators.includes(p));
+    if (projectIdx > 0) {
+      return '/' + commonParts.slice(0, projectIdx).join('/');
+    }
+
+    if (commonParts.length > 1) {
+      const lastPart = commonParts[commonParts.length - 1];
+      if (lastPart && lastPart.includes('.')) {
+        return '/' + commonParts.slice(0, -1).join('/');
+      }
+      return '/' + commonParts.join('/');
+    }
+
+    return undefined;
+  };
+
+  const fromAll = deriveFromPaths(absolutePaths);
+  if (fromAll) return fromAll;
+
+  const candidateCounts = new Map<string, number>();
+  for (const absPath of absolutePaths) {
+    const candidate = deriveFromPaths([absPath]);
+    if (!candidate) continue;
+    candidateCounts.set(candidate, (candidateCounts.get(candidate) ?? 0) + 1);
+  }
+
+  if (candidateCounts.size === 0) return undefined;
+
+  const [bestWorkspace] = Array.from(candidateCounts.entries())
+    .sort((a, b) => (b[1] - a[1]) || (b[0].length - a[0].length))[0]!;
+
+  return bestWorkspace;
+}
+
+function extractProjectName(workspacePath: string | undefined): string | undefined {
+  if (!workspacePath) return undefined;
+  const parts = workspacePath.split('/').filter(Boolean);
+  return parts[parts.length - 1];
 }
 
 /**
@@ -328,17 +399,22 @@ export function extractConversation(sessionId: string, filePath: string): RawCon
   }
 
   // Extract session metadata
-  const sessionMetaEntry = entries.find(
-    (e) => e.type === 'session_meta' && (e.payload as CodexSessionMeta).type === 'session_meta'
-  );
+  const sessionMetaEntry = entries.find((e) => e.type === 'session_meta');
   const sessionMeta = sessionMetaEntry?.payload as CodexSessionMeta | undefined;
 
-  // Extract model from turn_context if available
+  // Extract model/cwd from turn_context if available (can appear multiple times)
   let model: string | undefined;
-  const turnContextEntry = entries.find((e) => e.type === 'turn_context');
-  if (turnContextEntry) {
-    const payload = turnContextEntry.payload as { model?: string };
-    model = payload.model;
+  let turnContextCwd: string | undefined;
+  for (const entry of entries) {
+    if (entry.type === 'turn_context') {
+      const payload = entry.payload as { model?: string; cwd?: string };
+      if (!model && payload.model) {
+        model = payload.model;
+      }
+      if (!turnContextCwd && payload.cwd) {
+        turnContextCwd = payload.cwd;
+      }
+    }
   }
 
   // Build a map of call_id -> output for function call results
@@ -508,11 +584,20 @@ export function extractConversation(sessionId: string, filePath: string): RawCon
   const totalLinesAdded = allEdits.reduce((sum, e) => sum + e.linesAdded, 0);
   const totalLinesRemoved = allEdits.reduce((sum, e) => sum + e.linesRemoved, 0);
 
+  const sessionCwd = sessionMeta?.cwd?.trim() || undefined;
+  const workspaceFromFiles = extractWorkspacePath([
+    ...allFiles.map((f) => f.path),
+    ...allEdits.map((e) => e.filePath),
+  ]);
+  const workspacePath = sessionCwd || turnContextCwd || workspaceFromFiles;
+  const projectName = extractProjectName(workspacePath) || extractProjectName(workspaceFromFiles);
+
   return {
     sessionId,
     title,
-    workspacePath: sessionMeta?.cwd,
-    cwd: sessionMeta?.cwd,
+    workspacePath,
+    projectName,
+    cwd: sessionCwd || turnContextCwd,
     gitBranch: sessionMeta?.git?.branch,
     model,
     createdAt,
