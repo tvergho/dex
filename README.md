@@ -2,7 +2,7 @@
 
 **Local search engine for your AI coding conversations.**
 
-Dex indexes conversations from AI coding assistants (Cursor, Claude Code, Codex) into a local database with full-text search. Find that conversation where you debugged that tricky auth issue, or search across all your pair programming sessions.
+Dex indexes conversations from AI coding assistants (Cursor, Claude Code, Codex, OpenCode) into a local database with full-text search. Find that conversation where you debugged that tricky auth issue, or search across all your pair programming sessions.
 
 ## Features
 
@@ -19,6 +19,7 @@ Dex indexes conversations from AI coding assistants (Cursor, Claude Code, Codex)
 | Cursor | ✅ Supported |
 | Claude Code | ✅ Supported |
 | Codex CLI | ✅ Supported |
+| OpenCode | ✅ Supported |
 
 ## Installation
 

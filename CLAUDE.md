@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Dex is a local search engine for coding agent conversations. It indexes conversations from various AI coding tools (Cursor, Claude Code, Codex) into a local LanceDB database with full-text search.
+Dex is a local search engine for coding agent conversations. It indexes conversations from various AI coding tools (Cursor, Claude Code, Codex, OpenCode) into a local LanceDB database with full-text search.
 
 ## Tech Stack
 
@@ -20,6 +20,7 @@ src/
 │   ├── cursor/         # Cursor IDE adapter
 │   ├── claude-code/    # Claude Code CLI adapter
 │   ├── codex/          # Codex CLI adapter
+│   ├── opencode/       # OpenCode CLI adapter
 │   ├── types.ts        # Adapter interface definitions
 │   └── index.ts        # Adapter registry
 ├── cli/
@@ -157,6 +158,16 @@ Stores conversations in JSONL files:
 - All platforms: `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
 - Entry types: `session_meta`, `response_item`, `event_msg`, `turn_context`
 - Fields: `payload.content`, `payload.type` (message/function_call), token counts in `event_msg`
+
+### OpenCode
+Stores conversations in JSON files with a hierarchical structure:
+- All platforms: `~/.local/share/opencode/storage/`
+- Directory structure:
+  - `project/{projectId}.json` - Project metadata with worktree path
+  - `session/{projectId}/{sessionId}.json` - Session metadata (title, timestamps)
+  - `message/{sessionId}/{messageId}.json` - Message metadata (role, tokens)
+  - `part/{messageId}/{partId}.json` - Message content parts (text, tool calls)
+- Fields: `worktree` (project path), `title`, `tokens` (input/output/cache), tool `state` (input/output)
 
 ## Testing Changes
 
