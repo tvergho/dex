@@ -172,8 +172,9 @@ All data is stored locally in `~/.dex/`:
 
 ```
 ~/.dex/
-├── lancedb/          # Main database (conversations, messages, FTS index)
-├── models/           # Embedding models (downloaded on first use)
+├── lancedb/              # Main database (conversations, messages, FTS index)
+├── models/               # Embedding models (downloaded on first use)
+├── embed-config.json     # Auto-benchmarked embedding settings
 └── embedding-progress.json
 ```
 
@@ -192,6 +193,9 @@ bun run lint:fix
 
 # Run tests
 bun run test:all
+
+# Reset database (for testing)
+bun run reset
 ```
 
 ## How It Works

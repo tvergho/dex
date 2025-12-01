@@ -82,6 +82,7 @@ bun run dev import <file>           # Import from backup
 bun run typecheck                   # Run TypeScript type checking
 bun run lint                        # Run ESLint
 bun run lint:fix                    # Auto-fix lint issues
+bun run reset                       # Reset database and embedding config
 ```
 
 ## Architecture Patterns
@@ -305,10 +306,20 @@ dex search "fix bug" --file auth.ts    # Combined: content + file filter
 
 Background embedding generation for semantic search:
 - Uses `Qwen3-Embedding-0.6B` (1024 dimensions) via llama-server
+- **GPU acceleration**: Metal on macOS (`--n-gpu-layers 99`), flash attention enabled
+- **Auto-benchmark**: On first run, tests batch sizes to find optimal config for your system
 - Spawned automatically after sync completes
 - Progress tracked in `~/.dex/embedding-progress.json`
+- Benchmark config saved to `~/.dex/embed-config.json`
 - Model stored in `~/.dex/models/`
 - Check status with `dex status`
+
+### First-Load Experience
+
+On first run (when no messages exist in database):
+- The UI blocks until initial sync completes
+- Shows sync progress with spinner, phase, and live counts
+- After sync, normal home screen appears with background embedding
 
 ## Data Extraction
 
@@ -427,7 +438,7 @@ Cursor tests run separately with Node.js via `bun run test:cursor`.
 
 ### Manual Testing
 
-1. Delete old database: `rm -rf ~/.dex/lancedb`
+1. Reset database: `bun run reset`
 2. Re-sync: `bun run dev sync --force`
 3. Test search: `bun run dev search "your query"`
 4. Run typecheck: `bun run typecheck`
