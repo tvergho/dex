@@ -490,14 +490,14 @@ const ConversationListItem = React.memo(function ConversationListItem({
 
   return (
     <Box flexDirection="column">
-      <Box>
+      <Text>
         <Text color={isSelected ? 'cyan' : 'gray'}>{indexStr.padStart(indexWidth)} </Text>
         <Text color={isSelected ? 'cyan' : 'white'} bold={isSelected}>
           {title}
         </Text>
-        <Box flexGrow={1} />
+        {'  '}
         <Text color="gray">{timeStr}</Text>
-      </Box>
+      </Text>
       <Box marginLeft={indexWidth + 1}>
         <SourceBadge source={conversation.source} />
         <Text color="gray"> · {msgCount} msgs</Text>
@@ -646,7 +646,7 @@ function UnifiedApp() {
   // Layout calculations
   const headerHeight = 3;
   const footerHeight = 2;
-  const rowHeight = 3;
+  const rowHeight = 5; // 3 content rows + marginBottom=2
   const availableHeight = height - headerHeight - footerHeight;
   const visibleCount = Math.max(1, Math.floor(availableHeight / rowHeight));
 

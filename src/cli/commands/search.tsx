@@ -74,7 +74,7 @@ function SearchApp({
   // Layout calculations
   const headerHeight = 3;
   const footerHeight = 2;
-  const rowHeight = 4;
+  const rowHeight = 5; // 3 content rows + marginBottom=2
   const availableHeight = height - headerHeight - footerHeight;
   const visibleCount = Math.max(1, Math.floor(availableHeight / rowHeight));
 

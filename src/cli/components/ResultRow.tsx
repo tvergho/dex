@@ -47,9 +47,10 @@ export function ResultRow({
   const timeWidth = timeStr.length + matchStr.length + 5;
   const maxTitleWidth = Math.max(20, width - prefixWidth - timeWidth - 4);
 
-  const title = conversation.title.length > maxTitleWidth
-    ? conversation.title.slice(0, maxTitleWidth - 1) + '…'
-    : conversation.title;
+  const rawTitle = conversation.title || 'Untitled';
+  const title = rawTitle.length > maxTitleWidth
+    ? rawTitle.slice(0, maxTitleWidth - 1) + '…'
+    : rawTitle;
 
   // Build row 2 metadata parts for colored display
   const sourceName = formatSourceLabel(conversation.source);
@@ -125,15 +126,15 @@ export function ResultRow({
   return (
     <Box flexDirection="column" marginBottom={2}>
       {/* Row 1: Index + Title + Match count + Time */}
-      <Box width={width}>
+      <Text>
         {index !== undefined && (
           <Text color={isSelected ? 'cyan' : 'gray'}>{indexStr.padStart(indexWidth)} </Text>
         )}
         <Text color={isSelected ? 'cyan' : 'white'} bold={isSelected} underline={isSelected}>{title}</Text>
-        <Box flexGrow={1} />
+        {'  '}
         <Text bold color="yellow">{matchStr}</Text>
         <Text color="gray"> · {timeStr}</Text>
-      </Box>
+      </Text>
       {/* Row 2: Source + workspace path + tokens + lines */}
       <Box marginLeft={indexWidth + (indexWidth > 0 ? 1 : 0)} width={contentWidth}>
         <Text wrap="truncate-end">
