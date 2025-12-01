@@ -11,11 +11,12 @@ import { backupCommand } from './cli/commands/backup';
 import { importCommand } from './cli/commands/import';
 import { unifiedCommand } from './cli/commands/unified';
 import { configCommand } from './cli/commands/config';
+import { embedCommand } from './cli/commands/embed';
 
 const program = new Command()
   .name('dex')
   .description('Universal search for your coding agent conversations')
-  .version('0.1.0');
+  .version('0.1.1');
 
 program
   .command('sync')
@@ -88,6 +89,12 @@ program
   .command('config')
   .description('Open settings')
   .action(configCommand);
+
+// Internal command for background embedding (hidden from help)
+program
+  .command('embed', { hidden: true })
+  .option('--benchmark', 'Run benchmark to find optimal settings')
+  .action(embedCommand);
 
 // Default action when no subcommand is provided
 program.action(async () => {

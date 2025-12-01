@@ -21,6 +21,16 @@ import { conversationRepo, search, searchByFilePath, getFileMatchesForConversati
 // Note: sync runs in child process via runSyncInBackground to avoid blocking UI
 import { getLanceDBPath } from '../../utils/config';
 
+// Helper to spawn dex subcommands - works with both dev (bun) and installed (node) versions
+function spawnDexCommand(command: string, args: string[] = [], options: Parameters<typeof spawn>[2] = {}) {
+  // Use the same runtime that's running this process
+  return spawn(process.execPath, [process.argv[1]!, command, ...args], options);
+}
+
+// Helper to get the runtime for inline scripts (bun or node)
+const isBun = process.versions.bun !== undefined;
+const runtimeCmd = isBun ? 'bun' : 'node';
+
 // Get count via child process to avoid blocking UI
 function getCountInBackground(): Promise<number> {
   return new Promise((resolve) => {
@@ -44,7 +54,7 @@ process.exit(0);
 `;
 
     let resolved = false;
-    const child = spawn('bun', ['-e', script], {
+    const child = spawn(runtimeCmd, ['-e', script], {
       stdio: ['ignore', 'pipe', 'ignore'],
     });
 
@@ -86,7 +96,7 @@ function runSyncInBackground(
 ): void {
   // Get initial count first, then spawn sync
   getCountInBackground().then((initialCount) => {
-    const child = spawn('bun', ['run', 'dev', 'sync'], {
+    const child = spawnDexCommand('sync', [], {
       stdio: ['ignore', 'ignore', 'ignore'],
       detached: true,
     });
@@ -134,7 +144,7 @@ process.exit(0);
 `;
 
     let resolved = false;
-    const child = spawn('bun', ['-e', script], {
+    const child = spawn(runtimeCmd, ['-e', script], {
       stdio: ['ignore', 'pipe', 'ignore'],
     });
 
@@ -195,7 +205,7 @@ function runSyncBlocking(
     };
     onProgress(progress);
 
-    const child = spawn('bun', ['run', 'dev', 'sync'], {
+    const child = spawnDexCommand('sync', [], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 

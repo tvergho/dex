@@ -13,8 +13,6 @@ import { spawn, exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 import { adapters } from '../../adapters/index';
 import type { SourceLocation, NormalizedConversation } from '../../adapters/types';
 import {
@@ -231,23 +229,23 @@ function SyncUI({ progress }: { progress: SyncProgress }) {
 }
 
 function spawnBackgroundEmbedding(): void {
-  // Get the path to the embed script
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = dirname(__filename);
-  const embedScript = join(__dirname, 'embed.ts');
-
-  // Spawn background process with low priority (nice 19 = lowest priority)
+  // Spawn background embedding process with low priority (nice 19 = lowest priority)
   // This minimizes impact on user's foreground work
-  // On macOS/Linux, nice lowers scheduling priority; on Windows it's ignored
+  // Uses the same runtime (node/bun) that's running this process
   const isWindows = process.platform === 'win32';
+
+  // Build command to run `dex embed` in background
+  const execPath = process.execPath;
+  const scriptPath = process.argv[1]!;
+
   const command = isWindows
-    ? `bun run "${embedScript}"`
-    : `nice -n 19 bun run "${embedScript}"`;
+    ? `"${execPath}" "${scriptPath}" embed`
+    : `nice -n 19 "${execPath}" "${scriptPath}" embed`;
 
   const child = spawn(command, [], {
     detached: true,
     stdio: 'ignore',
-    shell: true, // Use shell to ensure PATH is resolved correctly
+    shell: true, // Use shell for nice command and proper quoting
   });
 
   child.unref();

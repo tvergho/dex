@@ -1,6 +1,6 @@
 {
   "name": "agentdex",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local search engine for AI coding agent conversations (Cursor, Claude Code, Codex, OpenCode)",
   "type": "module",
   "license": "MIT",

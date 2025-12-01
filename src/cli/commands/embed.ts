@@ -682,25 +682,16 @@ async function runBenchmark(): Promise<void> {
   console.log(`\n📊 With ${totalMessages} messages, estimated embedding time: ~${estimatedMinutes} minutes`);
 }
 
-// ============ Main Entry Point ============
+// ============ Exported Command ============
 
-const args = process.argv.slice(2);
+interface EmbedOptions {
+  benchmark?: boolean;
+}
 
-if (args.includes('--benchmark')) {
-  runBenchmark()
-    .then(() => process.exit(0))
-    .catch((err) => {
-      console.error('Benchmark failed:', err);
-      process.exit(1);
-    });
-} else {
-  // Run if called directly
-  runBackgroundEmbedding()
-    .then(() => {
-      process.exit(0);
-    })
-    .catch((err) => {
-      console.error('Embedding failed:', err);
-      process.exit(1);
-    });
+export async function embedCommand(options: EmbedOptions = {}): Promise<void> {
+  if (options.benchmark) {
+    await runBenchmark();
+  } else {
+    await runBackgroundEmbedding();
+  }
 }
