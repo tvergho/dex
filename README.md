@@ -7,6 +7,7 @@ Dex indexes conversations from AI coding assistants (Cursor, Claude Code, Codex,
 ## Features
 
 - 🔍 **Full-text search** across all your AI conversations
+- 🧠 **Semantic search** - finds related content even without exact keyword matches
 - 📄 **File path search** - find conversations by file (e.g., `--file auth.ts`)
 - 🖥️ **Interactive TUI** with vim-style navigation (j/k, Enter, Esc)
 - 📁 **Project context** - see which files were discussed
@@ -33,7 +34,7 @@ Dex indexes conversations from AI coding assistants (Cursor, Claude Code, Codex,
 ### From Source
 
 ```bash
-git clone https://github.com/yourusername/dex.git
+git clone https://github.com/tvergho/dex.git
 cd dex
 bun install
 ```
@@ -68,6 +69,10 @@ bun run dev search --file src/components
 
 # Combined: content + file filter
 bun run dev search "authentication bug" --file auth.ts
+
+# Filter by source or model
+bun run dev search "bug" --source cursor
+bun run dev search "refactor" --model opus
 ```
 
 Navigate the interactive TUI:
@@ -202,14 +207,48 @@ bun run reset
 
 1. **Sync** reads conversation data from source applications (e.g., Cursor's SQLite database)
 2. Data is normalized into a unified schema and stored in LanceDB
-3. **Search** uses LanceDB's full-text search with BM25 ranking
+3. **Search** combines full-text search (BM25) with semantic vector search for best results
 4. Results are presented in an interactive terminal UI built with Ink
+
+## Configuration
+
+### Settings
+
+```bash
+# Open interactive settings
+bun run dev config
+```
+
+The config menu lets you:
+- Connect API keys for title generation (uses Claude or Codex to generate titles for untitled conversations)
+- View credential status
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DEX_DATA_DIR` | Custom data directory | `~/.dex` |
+
+Example:
+```bash
+DEX_DATA_DIR=~/my-dex-data bun run dev sync
+```
+
+## Uninstall
+
+To completely remove Dex and all indexed data:
+
+```bash
+rm -rf ~/.dex
+```
+
+If using a custom data directory, remove that instead.
 
 ## Privacy
 
 Dex is fully local:
 - All data stays on your machine in `~/.dex/`
-- No network requests (except downloading the embedding model once)
+- No network requests (except downloading the embedding model and llama-server binary once)
 - No telemetry or analytics
 
 ## License
