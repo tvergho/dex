@@ -13,7 +13,7 @@ import { conversationToMarkdown, generateFilename, getProjectName } from './expo
 import { copyToClipboard } from './clipboard';
 
 /**
- * Export conversations to markdown files in ./dex-export/{source}/{project}/
+ * Export conversations to markdown files in ./agentdex-export/{source}/{project}/
  * Returns the output directory path
  */
 export async function exportConversationsToFile(
@@ -21,7 +21,7 @@ export async function exportConversationsToFile(
 ): Promise<string> {
   await connect();
 
-  const outputDir = './dex-export';
+  const outputDir = './agentdex-export';
 
   // Track filenames used to handle collisions
   const usedFilenames = new Map<string, number>();

@@ -1,8 +1,10 @@
-# Dex
+# agentdex
 
 **Local search engine for your AI coding conversations.**
 
-Dex indexes conversations from AI coding assistants (Cursor, Claude Code, Codex, OpenCode) into a local database with full-text search. Find that conversation where you debugged that tricky auth issue, or search across all your pair programming sessions.
+[agentdex.sh](https://agentdex.sh)
+
+agentdex indexes conversations from AI coding assistants (Cursor, Claude Code, Codex, OpenCode) into a local database with full-text search. Find that conversation where you debugged that tricky auth issue, or search across all your pair programming sessions.
 
 ## Features
 
@@ -34,8 +36,8 @@ Dex indexes conversations from AI coding assistants (Cursor, Claude Code, Codex,
 ### From Source
 
 ```bash
-git clone https://github.com/tvergho/dex.git
-cd dex
+git clone https://github.com/tvergho/agentdex.git
+cd agentdex
 bun install
 ```
 
@@ -134,7 +136,7 @@ bun run dev export --id <conversation-id>
 
 Output structure:
 ```
-dex-export/
+agentdex-export/
 └── cursor/
     └── my-project/
         └── 2025-01-15_fixing-auth-bug.md
@@ -236,7 +238,7 @@ DEX_DATA_DIR=~/my-dex-data bun run dev sync
 
 ## Uninstall
 
-To completely remove Dex and all indexed data:
+To completely remove agentdex and all indexed data:
 
 ```bash
 rm -rf ~/.dex
@@ -246,7 +248,7 @@ If using a custom data directory, remove that instead.
 
 ## Privacy
 
-Dex is fully local:
+agentdex is fully local:
 - All data stays on your machine in `~/.dex/`
 - No network requests (except downloading the embedding model and llama-server binary once)
 - No telemetry or analytics

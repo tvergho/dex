@@ -1,8 +1,8 @@
-# CLAUDE.md - Dex Project Guide
+# CLAUDE.md - agentdex Project Guide
 
 ## Project Overview
 
-Dex is a local search engine for coding agent conversations. It indexes conversations from various AI coding tools (Cursor, Claude Code, Codex, OpenCode) into a local LanceDB database with full-text search.
+agentdex is a local search engine for coding agent conversations. It indexes conversations from various AI coding tools (Cursor, Claude Code, Codex, OpenCode) into a local LanceDB database with full-text search.
 
 ## Tech Stack
 
@@ -242,7 +242,7 @@ LanceDB schema is defined by the first row inserted. To add new columns:
 Exports conversations as human-readable markdown files organized by source and project:
 
 ```bash
-dex export                          # Export all conversations to ./dex-export
+dex export                          # Export all conversations to ./agentdex-export
 dex export -o ~/my-exports          # Custom output directory
 dex export --source cursor          # Filter by source
 dex export --project myapp          # Filter by project path (substring match)

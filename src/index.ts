@@ -59,7 +59,7 @@ program
 program
   .command('export')
   .description('Export conversations as markdown files')
-  .option('-o, --output <dir>', 'Output directory', './dex-export')
+  .option('-o, --output <dir>', 'Output directory', './agentdex-export')
   .option('-p, --project <path>', 'Filter by project/workspace path')
   .option('-s, --source <source>', 'Filter by source (cursor, claude-code, codex, opencode)')
   .option('--from <date>', 'Start date (YYYY-MM-DD)')

@@ -1,10 +1,36 @@
 {
-  "name": "dex",
+  "name": "agentdex",
   "version": "0.1.0",
-  "description": "Universal search and analytics for your coding agent conversations",
+  "description": "Local search engine for AI coding agent conversations (Cursor, Claude Code, Codex, OpenCode)",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tvergho/agentdex.git"
+  },
+  "homepage": "https://agentdex.sh",
+  "bugs": {
+    "url": "https://github.com/tvergho/agentdex/issues"
+  },
+  "keywords": [
+    "cli",
+    "search",
+    "ai",
+    "agents",
+    "cursor",
+    "claude",
+    "codex",
+    "opencode",
+    "conversations"
+  ],
   "bin": {
     "dex": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
   },
   "scripts": {
     "dev": "tsx src/index.ts",

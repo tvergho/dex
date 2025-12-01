@@ -4,7 +4,7 @@
  * Usage: dex export [options]
  *
  * Options:
- *   -o, --output <dir>     Output directory (default: ./dex-export)
+ *   -o, --output <dir>     Output directory (default: ./agentdex-export)
  *   -p, --project <path>   Filter by project/workspace path
  *   -s, --source <source>  Filter by source (cursor, claude-code, codex, opencode)
  *   --from <date>          Start date (ISO 8601 or YYYY-MM-DD)
@@ -76,7 +76,7 @@ export async function exportCommand(options: ExportOptions): Promise<void> {
   console.log(`Found ${conversations.length} conversation(s) to export.`);
 
   // Determine output directory
-  const outputDir = options.output || './dex-export';
+  const outputDir = options.output || './agentdex-export';
 
   // Create output directory structure
   await mkdir(outputDir, { recursive: true });
