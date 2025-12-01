@@ -274,7 +274,9 @@ export async function runSync(
 
   try {
     // Connect to database
+    console.error('[sync] Connecting to database...');
     await connect();
+    console.error('[sync] Database connected');
 
     // ========== PHASE 1: Collect all data from all adapters ==========
     // This is fast - just reading files, no DB operations yet

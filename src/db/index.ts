@@ -137,9 +137,12 @@ export async function connect(): Promise<lancedb.Connection> {
   if (db) return db;
 
   const dbPath = getLanceDBPath();
+  console.error('[db] Connecting to LanceDB at', dbPath);
   db = await lancedb.connect(dbPath);
+  console.error('[db] LanceDB connected, ensuring tables...');
 
   await ensureTables();
+  console.error('[db] Tables ready');
 
   return db;
 }
