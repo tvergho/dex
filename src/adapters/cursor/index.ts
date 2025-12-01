@@ -218,6 +218,7 @@ export class CursorAdapter implements SourceAdapter {
           linesRemoved: edit.linesRemoved,
           startLine: edit.startLine,
           endLine: edit.endLine,
+          newContent: edit.newContent,
         });
       }
     }

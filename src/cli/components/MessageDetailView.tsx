@@ -86,10 +86,20 @@ export function MessageDetailView({
 
   // Build full content including tool outputs for assistant messages
   const fullContent = useMemo(() => {
+    // DEBUG: Log what we're receiving
+    console.error('[MessageDetailView] DEBUG:');
+    console.error('  toolCalls length:', toolCalls.length);
+    console.error('  fileEdits length:', fileEdits.length);
+    console.error('  message.role:', message.role);
+    console.error('  message.messageIds:', message.messageIds);
+    
     let content = message.content;
     if (message.role === 'assistant') {
-      content += formatToolOutputs(toolCalls, fileEdits, message.messageIds);
+      const toolOutput = formatToolOutputs(toolCalls, fileEdits, message.messageIds);
+      console.error('  toolOutput length:', toolOutput.length);
+      content += toolOutput;
     }
+    console.error('  final content length:', content.length);
     return content;
   }, [message.content, message.role, message.messageIds, toolCalls, fileEdits]);
 

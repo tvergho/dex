@@ -37,6 +37,15 @@ interface ToolUseResult {
     filePath?: string;
     content?: string;
   };
+  // Edit tool result fields
+  oldString?: string;
+  newString?: string;
+  originalFile?: string;
+  // Grep tool result fields
+  mode?: string;
+  numFiles?: number;
+  filenames?: string[];
+  numLines?: number;
 }
 
 interface ClaudeEntry {
@@ -170,11 +179,24 @@ function extractToolCalls(
   for (const c of content) {
     if (c.type === 'tool_use' && c.id && c.name) {
       const result = toolResults.get(c.id);
+      // Build output from various result types:
+      // - Bash: stdout
+      // - Read: file.content
+      // - Edit: newString (the new content that was written)
+      // - Grep: content (the search results)
+      // - Write: content or file.content
+      let output: string | undefined;
+      if (result) {
+        output = result.stdout || 
+                 result.file?.content || 
+                 result.newString ||
+                 result.content;
+      }
       toolCalls.push({
         id: c.id,
         name: c.name,
         input: typeof c.input === 'string' ? c.input : JSON.stringify(c.input),
-        output: result?.stdout || result?.content || result?.file?.content,
+        output,
         filePath: result?.filePath || result?.file?.filePath,
       });
     }

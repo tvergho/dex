@@ -505,33 +505,86 @@ export function extractConversations(dbPath: string): RawConversation[] {
       const diffMapping = buildDiffToFileMapping(data.codeBlockData);
       const allFileEdits = extractCodeBlockDiffs(db, composerId, diffMapping);
 
-      // Associate edits with bubbles by bubbleId
-      const bubbleIdToIndex = new Map<string, number>();
-      for (let i = 0; i < bubbles.length; i++) {
-        bubbleIdToIndex.set(bubbles[i]!.bubbleId, i);
+      // Build a map of bubbleId -> original position in the conversation
+      // This includes ALL bubbles, even tool-only ones without text
+      const bubbleIdToOriginalIndex = new Map<string, number>();
+      const headers = data.fullConversationHeadersOnly || [];
+      for (let i = 0; i < headers.length; i++) {
+        const header = headers[i];
+        if (header?.bubbleId) {
+          bubbleIdToOriginalIndex.set(header.bubbleId, i);
+        }
+      }
+      // Also check conversation array for older format
+      if (bubbleIdToOriginalIndex.size === 0 && data.conversation) {
+        for (let i = 0; i < data.conversation.length; i++) {
+          const item = data.conversation[i];
+          if (item?.bubbleId) {
+            bubbleIdToOriginalIndex.set(item.bubbleId, i);
+          }
+        }
       }
 
-      // Find the last assistant bubble index for orphaned edits
-      let lastAssistantIndex = -1;
-      for (let i = bubbles.length - 1; i >= 0; i--) {
-        if (bubbles[i]!.type === 'assistant') {
-          lastAssistantIndex = i;
-          break;
+      // Associate edits with bubbles by bubbleId
+      // Map our filtered bubbles to their original positions
+      const bubbleIdToFilteredIndex = new Map<string, number>();
+      const filteredBubbleOriginalIndices: Array<{ bubbleId: string; originalIndex: number; filteredIndex: number }> = [];
+      for (let i = 0; i < bubbles.length; i++) {
+        const bubble = bubbles[i]!;
+        bubbleIdToFilteredIndex.set(bubble.bubbleId, i);
+        const origIdx = bubbleIdToOriginalIndex.get(bubble.bubbleId) ?? i;
+        filteredBubbleOriginalIndices.push({
+          bubbleId: bubble.bubbleId,
+          originalIndex: origIdx,
+          filteredIndex: i,
+        });
+      }
+
+      // Sort by original index to enable binary search for nearest prior
+      filteredBubbleOriginalIndices.sort((a, b) => a.originalIndex - b.originalIndex);
+
+      // Find the nearest prior assistant bubble for orphaned edits
+      function findNearestPriorAssistant(editOriginalIndex: number): number {
+        let nearestIdx = -1;
+        for (const entry of filteredBubbleOriginalIndices) {
+          if (entry.originalIndex > editOriginalIndex) break;
+          if (bubbles[entry.filteredIndex]!.type === 'assistant') {
+            nearestIdx = entry.filteredIndex;
+          }
         }
+        // If no prior assistant found, use the first assistant in the conversation
+        if (nearestIdx < 0) {
+          for (let i = 0; i < bubbles.length; i++) {
+            if (bubbles[i]!.type === 'assistant') {
+              nearestIdx = i;
+              break;
+            }
+          }
+        }
+        return nearestIdx;
       }
 
       for (const edit of allFileEdits) {
         if (edit.bubbleId) {
-          const bubbleIndex = bubbleIdToIndex.get(edit.bubbleId);
+          const bubbleIndex = bubbleIdToFilteredIndex.get(edit.bubbleId);
           if (bubbleIndex !== undefined) {
+            // Exact match - associate with this bubble
             bubbles[bubbleIndex]!.fileEdits.push(edit);
-          } else if (lastAssistantIndex >= 0) {
-            // bubbleId exists but not found in our bubbles - associate with last assistant
-            bubbles[lastAssistantIndex]!.fileEdits.push(edit);
+          } else {
+            // bubbleId points to a tool-only bubble not in our filtered list
+            // Find the nearest prior assistant based on original conversation order
+            const editOriginalIndex = bubbleIdToOriginalIndex.get(edit.bubbleId) ?? Infinity;
+            const nearestAssistantIdx = findNearestPriorAssistant(editOriginalIndex);
+            if (nearestAssistantIdx >= 0) {
+              bubbles[nearestAssistantIdx]!.fileEdits.push(edit);
+            }
           }
-        } else if (lastAssistantIndex >= 0) {
-          // No bubbleId - associate with last assistant bubble
-          bubbles[lastAssistantIndex]!.fileEdits.push(edit);
+        } else {
+          // No bubbleId - associate with the last assistant bubble
+          const lastAssistantIdx = findNearestPriorAssistant(Infinity);
+          if (lastAssistantIdx >= 0) {
+            bubbles[lastAssistantIdx]!.fileEdits.push(edit);
+          }
         }
       }
 
