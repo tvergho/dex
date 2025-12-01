@@ -394,7 +394,12 @@ export function useNavigation({
     }
     return content;
   }, [currentMessage, conversationToolCalls, conversationFileEdits]);
-  const lineCount = fullContent ? getRenderedLineCount(fullContent, width) : 0;
+  
+  // Memoize line count calculation - markdown rendering is expensive
+  const lineCount = useMemo(() => {
+    return fullContent ? getRenderedLineCount(fullContent, width) : 0;
+  }, [fullContent, width]);
+  
   const visibleLines = availableHeight - 3;
   const maxMessageScrollOffset = Math.max(0, lineCount - visibleLines);
 

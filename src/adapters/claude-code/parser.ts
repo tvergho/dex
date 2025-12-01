@@ -152,16 +152,59 @@ function parseJsonlFile(filePath: string): ClaudeEntry[] {
 
 /**
  * Extract text content from a message's content array or string.
+ * For assistant messages with tool_use blocks, interleaves tool outputs at their correct positions.
  */
-function extractTextContent(content: string | ClaudeMessageContent[]): string {
+function extractTextContent(
+  content: string | ClaudeMessageContent[],
+  toolResults?: Map<string, ToolUseResult>,
+  isAssistant?: boolean
+): string {
   if (typeof content === 'string') {
     return content;
   }
 
-  return content
-    .filter((c) => c.type === 'text' && c.text)
-    .map((c) => c.text!)
-    .join('\n');
+  // For non-assistant messages or if no tool results, just extract text
+  if (!isAssistant || !toolResults) {
+    return content
+      .filter((c) => c.type === 'text' && c.text)
+      .map((c) => c.text!)
+      .join('\n');
+  }
+
+  // For assistant messages, interleave tool outputs at their positions
+  const parts: string[] = [];
+  
+  for (const c of content) {
+    if (c.type === 'text' && c.text) {
+      parts.push(c.text);
+    } else if (c.type === 'tool_use' && c.id && c.name) {
+      const result = toolResults.get(c.id);
+      if (result) {
+        // Build output string
+        const output = result.stdout || 
+                       result.file?.content || 
+                       result.newString ||
+                       result.content;
+        
+        if (output) {
+          const filePath = result.filePath || result.file?.filePath;
+          const fileName = filePath ? filePath.split('/').pop() : '';
+          
+          // Format as inline tool output block
+          parts.push('');
+          parts.push(`---`);
+          parts.push(`**${c.name}**${fileName ? ` \`${fileName}\`` : ''}`);
+          parts.push('```');
+          parts.push(output);
+          parts.push('```');
+          parts.push('---');
+          parts.push('');
+        }
+      }
+    }
+  }
+
+  return parts.join('\n');
 }
 
 /**
@@ -259,7 +302,7 @@ function extractFileEditsFromToolCalls(toolCalls: RawToolCall[]): RawFileEdit[] 
             editType: 'modify',
             linesRemoved: countLines(oldString),
             linesAdded: countLines(newString),
-            newContent: newString || undefined,
+            // Note: newContent not stored here - tool outputs are interleaved in message content
           });
         }
       } catch {
@@ -277,7 +320,7 @@ function extractFileEditsFromToolCalls(toolCalls: RawToolCall[]): RawFileEdit[] 
             editType: 'create',
             linesRemoved: 0,
             linesAdded: countLines(content),
-            newContent: content || undefined,
+            // Note: newContent not stored here - tool outputs are interleaved in message content
           });
         }
       } catch {
@@ -390,7 +433,8 @@ export function extractConversations(project: ClaudeCodeProject): RawConversatio
         }
       }
 
-      const content = extractTextContent(entry.message.content);
+      const isAssistant = entry.message.role === 'assistant';
+      const content = extractTextContent(entry.message.content, toolResults, isAssistant);
       const toolCalls = extractToolCalls(entry.message.content, toolResults);
       const files = extractFilesFromToolCalls(toolCalls);
       const fileEdits = extractFileEditsFromToolCalls(toolCalls);

@@ -71,8 +71,30 @@ function truncateText(text: string): string {
   return text.slice(0, MAX_TEXT_CHARS) + '...';
 }
 
+/**
+ * Strip interleaved tool output blocks from content before embedding.
+ * Tool outputs are formatted as:
+ *   ---
+ *   **ToolName** `filename`
+ *   ```
+ *   ... code ...
+ *   ```
+ *   ---
+ * We want to embed only the conversational text, not the code.
+ */
+function stripToolOutputs(text: string): string {
+  // Match tool output blocks: ---\n**ToolName**...\n```...```\n---
+  // Use a regex to match these blocks and remove them
+  const toolBlockPattern = /\n---\n\*\*[^*]+\*\*[^\n]*\n```[\s\S]*?```\n---\n?/g;
+  return text.replace(toolBlockPattern, '\n').trim();
+}
+
 function prepareTexts(texts: string[]): string[] {
-  return texts.map((text) => INSTRUCTION_PREFIX + truncateText(text));
+  return texts.map((text) => {
+    // Strip tool outputs before embedding to avoid embedding code
+    const stripped = stripToolOutputs(text);
+    return INSTRUCTION_PREFIX + truncateText(stripped);
+  });
 }
 
 async function runWithServer(
@@ -177,7 +199,8 @@ async function runWithNodeLlamaCpp(
   // Process in batches
   for (let i = 0; i < messages.length; i += FALLBACK_BATCH_SIZE) {
     const batch = messages.slice(i, i + FALLBACK_BATCH_SIZE);
-    const texts = batch.map((m) => m.content);
+    // Strip tool outputs before embedding to avoid embedding code
+    const texts = batch.map((m) => stripToolOutputs(m.content));
     const vectors = await embed(texts);
 
     // Build full rows with updated vectors for batch mergeInsert
