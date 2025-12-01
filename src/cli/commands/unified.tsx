@@ -18,7 +18,7 @@ import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { spawn } from 'child_process';
 import { connect } from '../../db/index';
 import { conversationRepo, search } from '../../db/repository';
-import { runSync, type SyncProgress } from './sync';
+// Note: sync runs in child process via runSyncInBackground to avoid blocking UI
 import { getLanceDBPath } from '../../utils/config';
 
 // Get count via child process to avoid blocking UI
@@ -78,6 +78,38 @@ process.exit(0);
     }, 5000);
   });
 }
+
+// Run sync in child process to avoid blocking UI
+// Returns: { newCount: number } on success, null on error
+function runSyncInBackground(
+  onComplete: (result: { newCount: number; diff: number } | null) => void
+): void {
+  // Get initial count first, then spawn sync
+  getCountInBackground().then((initialCount) => {
+    const child = spawn('bun', ['run', 'dev', 'sync'], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+      detached: true,
+    });
+
+    // Don't let child process keep parent alive
+    child.unref();
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        // Get new count after sync
+        getCountInBackground().then((newCount) => {
+          onComplete({ newCount, diff: Math.max(0, newCount - initialCount) });
+        });
+      } else {
+        onComplete(null);
+      }
+    });
+
+    child.on('error', () => {
+      onComplete(null);
+    });
+  });
+}
 import { StatsContent } from './stats';
 import {
   ResultRow,
@@ -110,7 +142,7 @@ const LOGO = `
 // Unified view mode includes home and stats in addition to navigation modes
 type UnifiedViewMode = 'home' | 'stats' | NavigationViewMode;
 
-function ConversationListItem({
+const ConversationListItem = React.memo(function ConversationListItem({
   conversation,
   isSelected,
   width,
@@ -167,7 +199,7 @@ function ConversationListItem({
       </Box>
     </Box>
   );
-}
+});
 
 function HomeScreen({
   width,
@@ -351,6 +383,7 @@ function UnifiedApp() {
   // Background sync - runs after DB connection
   const syncStartedRef = useRef(false);
   const initStartedRef = useRef(false);
+  const dbReadyPromiseRef = useRef<Promise<void> | null>(null);
 
   const startBackgroundSync = useCallback(() => {
     if (syncStartedRef.current) return;
@@ -358,45 +391,45 @@ function UnifiedApp() {
 
     setSyncStatus({ phase: 'syncing', message: 'Syncing...' });
 
-    // Capture current count before sync
-    conversationRepo.count().then((initialCount) => {
-      runSync({ force: false }, (progress: SyncProgress) => {
-        if (progress.phase === 'done') {
-          conversationRepo.count().then((newCount) => {
-            const diff = Math.max(0, newCount - initialCount);
-            setConversationCount(newCount);
-            setSyncStatus({ phase: 'done', newConversations: diff });
-          });
-        } else if (progress.phase === 'error') {
-          setSyncStatus({ phase: 'error', message: progress.error || 'Sync failed' });
-        }
-      }).catch((err) => {
-        setSyncStatus({ phase: 'error', message: err instanceof Error ? err.message : 'Sync failed' });
-      });
+    // Run sync in separate child process to avoid blocking UI
+    runSyncInBackground((result) => {
+      if (result) {
+        setConversationCount(result.newCount);
+        setSyncStatus({ phase: 'done', newConversations: result.diff });
+      } else {
+        setSyncStatus({ phase: 'error', message: 'Sync failed' });
+      }
     });
   }, []);
 
-  // Connect to DB lazily - only when user navigates away from home
-  const ensureDbReady = useCallback(async () => {
-    if (dbReady) return;
-    await connect();
-    setDbReady(true);
-
-    // Get count and start sync after DB is ready
-    const count = await conversationRepo.count();
-    setConversationCount(count);
-    startBackgroundSync();
-  }, [dbReady, startBackgroundSync]);
-
-  // Fetch conversation count on startup (non-blocking child process)
+  // Start DB connection immediately on mount (non-blocking)
   useEffect(() => {
     if (initStartedRef.current) return;
     initStartedRef.current = true;
 
+    // Get count in background child process (fast, non-blocking)
     getCountInBackground().then((count) => {
       setConversationCount(count);
     });
-  }, []);
+
+    // Start DB connection immediately so it's ready when user navigates
+    dbReadyPromiseRef.current = (async () => {
+      await connect();
+      setDbReady(true);
+      const count = await conversationRepo.count();
+      setConversationCount(count);
+      startBackgroundSync();
+    })();
+  }, [startBackgroundSync]);
+
+  // Wait for DB to be ready (returns immediately if already connected)
+  const ensureDbReady = useCallback(async () => {
+    if (dbReady) return;
+    // Wait for the existing connection promise instead of starting a new one
+    if (dbReadyPromiseRef.current) {
+      await dbReadyPromiseRef.current;
+    }
+  }, [dbReady]);
 
   // Load conversations when entering list view (DB should already be ready from goToList)
   useEffect(() => {

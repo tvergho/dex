@@ -9,7 +9,7 @@
  * - Keyboard handling for navigation
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { messageRepo, filesRepo, messageFilesRepo, toolCallRepo, fileEditsRepo } from '../../db/repository';
 import {
   combineConsecutiveMessages,
@@ -142,6 +142,22 @@ export function useNavigation({
 
   // List view state
   const [selectedIndex, setSelectedIndex] = useState(0);
+
+  // Refs for stable callback access (avoids callback recreation on every state change)
+  const selectedIndexRef = useRef(selectedIndex);
+  const displayItemsRef = useRef(displayItems);
+  const hasSearchResultsRef = useRef(hasSearchResults);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
+  useEffect(() => {
+    displayItemsRef.current = displayItems;
+  }, [displayItems]);
+  useEffect(() => {
+    hasSearchResultsRef.current = hasSearchResults;
+  }, [hasSearchResults]);
 
   // Matches view state
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
@@ -293,26 +309,31 @@ export function useNavigation({
     }
   }, [viewMode, hasSearchResults, expandedResult, goToList, onExitList]);
 
-  // List navigation
+  // List navigation - use refs for stable callbacks
   const selectNext = useCallback(() => {
-    setSelectedIndex((i) => Math.min(i + 1, displayItems.length - 1));
-  }, [displayItems.length]);
+    setSelectedIndex((i) => Math.min(i + 1, displayItemsRef.current.length - 1));
+  }, []);
 
   const selectPrev = useCallback(() => {
     setSelectedIndex((i) => Math.max(i - 1, 0));
   }, []);
 
   const expandSelected = useCallback(async () => {
-    const item = displayItems[selectedIndex];
+    // Use refs for stable callback - avoids recreation on every selectedIndex change
+    const idx = selectedIndexRef.current;
+    const items = displayItemsRef.current;
+    const hasResults = hasSearchResultsRef.current;
+
+    const item = items[idx];
     if (!item) return;
 
-    if (hasSearchResults && item.matches.length > 0) {
-      goToMatches(selectedIndex);
+    if (hasResults && item.matches.length > 0) {
+      goToMatches(idx);
     } else {
-      setExpandedIndex(selectedIndex);
+      setExpandedIndex(idx);
       await goToConversation(item.conversation.id);
     }
-  }, [displayItems, selectedIndex, hasSearchResults, goToMatches, goToConversation]);
+  }, [goToMatches, goToConversation]);
 
   // Matches navigation
   const selectNextMatch = useCallback(() => {
@@ -460,7 +481,8 @@ export function useNavigation({
     downArrow?: boolean;
     upArrow?: boolean;
   }): boolean => {
-    if (displayItems.length === 0) return false;
+    // Use ref to avoid callback recreation when displayItems changes
+    if (displayItemsRef.current.length === 0) return false;
 
     // Back navigation (works in all views)
     if (key.escape || key.backspace || key.delete) {
@@ -552,7 +574,7 @@ export function useNavigation({
 
     return false;
   }, [
-    displayItems.length,
+    // List navigation callbacks are now stable via refs
     viewMode,
     goBack,
     scrollMessageDown,
