@@ -11,7 +11,7 @@ import {
   type MessageFile,
   type FileEdit,
 } from '../../schema/index.js';
-import type { SourceAdapter, SourceLocation, NormalizedConversation } from '../types.js';
+import type { SourceAdapter, SourceLocation, NormalizedConversation, ExtractionProgress } from '../types.js';
 
 export class OpenCodeAdapter implements SourceAdapter {
   name = Source.OpenCode;
@@ -36,7 +36,10 @@ export class OpenCodeAdapter implements SourceAdapter {
     return locations;
   }
 
-  async extract(location: SourceLocation): Promise<RawConversation[]> {
+  async extract(
+    location: SourceLocation,
+    _onProgress?: (progress: ExtractionProgress) => void
+  ): Promise<RawConversation[]> {
     // Find the project that matches this location
     const projects = discoverProjects();
     const project = projects.find((p) => p.projectDir === location.dbPath);

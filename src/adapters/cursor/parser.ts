@@ -321,27 +321,27 @@ function buildDiffToFileMapping(codeBlockData: Record<string, Record<string, Cod
   return mapping;
 }
 
-// Extract code block diffs from database and convert to file edits
-function extractCodeBlockDiffs(
-  db: BetterSqliteDatabase,
-  composerId: string,
-  diffMapping: Map<string, CodeBlockMapping>
-): RawFileEdit[] {
-  const edits: RawFileEdit[] = [];
+// Pre-parsed diff data structure
+interface ParsedDiffRow {
+  composerId: string;
+  diffId: string;
+  diffs: DiffEntry[];
+}
 
-  // Query all codeBlockDiff entries for this composer
+// Load and parse all codeBlockDiff entries upfront
+function loadAllCodeBlockDiffs(db: BetterSqliteDatabase): Map<string, ParsedDiffRow[]> {
+  const diffsByComposer = new Map<string, ParsedDiffRow[]>();
+
   const diffRows = db
-    .prepare("SELECT key, value FROM cursorDiskKV WHERE key LIKE ?")
-    .all(`codeBlockDiff:${composerId}:%`) as Array<{ key: string; value: Buffer | string }>;
+    .prepare("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'codeBlockDiff:%'")
+    .all() as Array<{ key: string; value: Buffer | string }>;
 
   for (const row of diffRows) {
-    // Extract diffId from key: codeBlockDiff:{composerId}:{diffId}
+    // Extract composerId and diffId from key: codeBlockDiff:{composerId}:{diffId}
     const keyParts = row.key.split(':');
+    const composerId = keyParts[1];
     const diffId = keyParts[2];
-    if (!diffId) continue;
-
-    const mapping = diffMapping.get(diffId);
-    if (!mapping) continue; // Skip orphaned diffs without file mapping
+    if (!composerId || !diffId) continue;
 
     // Parse the diff value
     let valueStr: string;
@@ -353,46 +353,103 @@ function extractCodeBlockDiffs(
 
     try {
       const parsed = JSON.parse(valueStr) as { newModelDiffWrtV0?: DiffEntry[] };
-
-      // Extract individual diff hunks
       if (parsed.newModelDiffWrtV0 && Array.isArray(parsed.newModelDiffWrtV0)) {
-        for (const diff of parsed.newModelDiffWrtV0) {
-          const startLine = diff.original?.startLineNumber ?? 0;
-          const endLine = diff.original?.endLineNumberExclusive ?? 0;
-          const linesRemoved = endLine - startLine;
-          const linesAdded = diff.modified?.length ?? 0;
-
-          edits.push({
-            filePath: mapping.filePath,
-            editType: linesRemoved === 0 ? 'create' : 'modify',
-            linesAdded,
-            linesRemoved,
-            startLine: startLine > 0 ? startLine : undefined,
-            endLine: endLine > 0 ? endLine : undefined,
-            bubbleId: mapping.bubbleId,
-            newContent: diff.modified?.join('\n'),
-          });
+        if (!diffsByComposer.has(composerId)) {
+          diffsByComposer.set(composerId, []);
         }
+        diffsByComposer.get(composerId)!.push({
+          composerId,
+          diffId,
+          diffs: parsed.newModelDiffWrtV0,
+        });
       }
     } catch {
       // Skip malformed diff entries
     }
   }
 
+  return diffsByComposer;
+}
+
+// Extract code block diffs for a specific composer using pre-loaded data
+function extractCodeBlockDiffs(
+  diffsByComposer: Map<string, ParsedDiffRow[]>,
+  composerId: string,
+  diffMapping: Map<string, CodeBlockMapping>
+): RawFileEdit[] {
+  const edits: RawFileEdit[] = [];
+  const composerDiffs = diffsByComposer.get(composerId);
+  if (!composerDiffs) return edits;
+
+  for (const { diffId, diffs } of composerDiffs) {
+    const mapping = diffMapping.get(diffId);
+    if (!mapping) continue; // Skip orphaned diffs without file mapping
+
+    for (const diff of diffs) {
+      const startLine = diff.original?.startLineNumber ?? 0;
+      const endLine = diff.original?.endLineNumberExclusive ?? 0;
+      const linesRemoved = endLine - startLine;
+      const linesAdded = diff.modified?.length ?? 0;
+
+      edits.push({
+        filePath: mapping.filePath,
+        editType: linesRemoved === 0 ? 'create' : 'modify',
+        linesAdded,
+        linesRemoved,
+        startLine: startLine > 0 ? startLine : undefined,
+        endLine: endLine > 0 ? endLine : undefined,
+        bubbleId: mapping.bubbleId,
+        newContent: diff.modified?.join('\n'),
+      });
+    }
+  }
+
   return edits;
 }
 
-export function extractConversations(dbPath: string): RawConversation[] {
+// Yield to the event loop to keep the UI responsive
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+export interface ExtractionProgress {
+  current: number;
+  total: number;
+}
+
+export async function extractConversations(
+  dbPath: string,
+  onProgress?: (progress: ExtractionProgress) => void
+): Promise<RawConversation[]> {
   const db = new Database(dbPath, { readonly: true });
   const conversations: RawConversation[] = [];
 
   try {
-    // Get all composerData entries from global cursorDiskKV
-    const composerRows = db
-      .prepare("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'")
-      .all() as Array<{ key: string; value: Buffer | string }>;
+    // Pre-load all codeBlockDiff entries upfront to avoid N+1 queries
+    // (diffs are small - only ~933 conversations have them)
+    const diffsByComposer = loadAllCodeBlockDiffs(db);
 
-    for (const row of composerRows) {
+    // Note: We don't pre-load bubbles because they're too large (125k+ entries, 4GB+ memory)
+    // Instead we do one batch query per conversation that needs v9+ format
+
+    // Pre-prepare the bubble query statement for reuse (avoid creating new statement per conversation)
+    const bubbleQueryStmt = db.prepare('SELECT key, value FROM cursorDiskKV WHERE key LIKE ?');
+
+    // Get total count for progress reporting
+    const totalCount = (db.prepare("SELECT COUNT(*) as count FROM cursorDiskKV WHERE key LIKE 'composerData:%'").get() as { count: number }).count;
+
+    // Use iterate() instead of all() to avoid loading all rows into memory at once
+    // This is critical for large databases (some users have 400MB+ of composer data)
+    const composerStmt = db.prepare("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'");
+    let processedCount = 0;
+
+    for (const row of composerStmt.iterate() as IterableIterator<{ key: string; value: Buffer | string }>) {
+      // Yield to event loop and report progress every 100 conversations
+      processedCount++;
+      if (processedCount % 100 === 0) {
+        onProgress?.({ current: processedCount, total: totalCount });
+        await yieldToEventLoop();
+      }
       // Parse the value
       let valueStr: string;
       if (Buffer.isBuffer(row.value)) {
@@ -459,40 +516,47 @@ export function extractConversations(dbPath: string): RawConversation[] {
       // Try to get bubbles from separate bubbleId entries (newest format - v9+)
       // In this format, conversationMap is empty but bubbles are stored as separate entries
       if (bubbles.length === 0 && data.fullConversationHeadersOnly && data.fullConversationHeadersOnly.length > 0) {
+        // Batch load all bubbles for this composer in one query instead of N+1 queries
+        // Reuse prepared statement for performance
+        const bubblePrefix = `bubbleId:${composerId}:`;
+        const bubbleRows = bubbleQueryStmt.all(`${bubblePrefix}%`) as Array<{ key: string; value: Buffer | string }>;
+
+        // Build a map of bubbleId -> bubbleData for fast lookup
+        const bubbleMap = new Map<string, BubbleData>();
+        for (const bubbleRow of bubbleRows) {
+          const bubbleId = bubbleRow.key.replace(bubblePrefix, '');
+          try {
+            let bubbleStr: string;
+            if (Buffer.isBuffer(bubbleRow.value)) {
+              bubbleStr = bubbleRow.value.toString('utf-8');
+            } else {
+              bubbleStr = bubbleRow.value;
+            }
+            const bubbleData = JSON.parse(bubbleStr) as BubbleData;
+            if (bubbleData) {
+              bubbleMap.set(bubbleId, bubbleData);
+            }
+          } catch {
+            // Skip malformed bubble data
+          }
+        }
+
+        // Iterate through headers and look up from the map
         for (const header of data.fullConversationHeadersOnly) {
           if (header.bubbleId) {
-            // Look up bubble from separate bubbleId entry
-            const bubbleKey = `bubbleId:${composerId}:${header.bubbleId}`;
-            try {
-              const bubbleRow = db
-                .prepare('SELECT value FROM cursorDiskKV WHERE key = ?')
-                .get(bubbleKey) as { value: Buffer | string } | undefined;
-
-              if (bubbleRow) {
-                let bubbleStr: string;
-                if (Buffer.isBuffer(bubbleRow.value)) {
-                  bubbleStr = bubbleRow.value.toString('utf-8');
-                } else {
-                  bubbleStr = bubbleRow.value;
-                }
-
-                const bubbleData = JSON.parse(bubbleStr) as BubbleData;
-                if (bubbleData && bubbleData.text) {
-                  const bubbleFiles = extractBubbleFiles(bubbleData);
-                  bubbles.push({
-                    bubbleId: header.bubbleId,
-                    type: mapBubbleType(header.type ?? bubbleData.type),
-                    text: bubbleData.text,
-                    files: bubbleFiles,
-                    fileEdits: [], // Will be populated after diff extraction
-                    inputTokens: bubbleData.tokenCount?.inputTokens,
-                    outputTokens: bubbleData.tokenCount?.outputTokens,
-                  });
-                  bubbleDataList.push(bubbleData);
-                }
-              }
-            } catch {
-              // Skip invalid bubble entries
+            const bubbleData = bubbleMap.get(header.bubbleId);
+            if (bubbleData && bubbleData.text) {
+              const bubbleFiles = extractBubbleFiles(bubbleData);
+              bubbles.push({
+                bubbleId: header.bubbleId,
+                type: mapBubbleType(header.type ?? bubbleData.type),
+                text: bubbleData.text,
+                files: bubbleFiles,
+                fileEdits: [], // Will be populated after diff extraction
+                inputTokens: bubbleData.tokenCount?.inputTokens,
+                outputTokens: bubbleData.tokenCount?.outputTokens,
+              });
+              bubbleDataList.push(bubbleData);
             }
           }
         }
@@ -501,9 +565,9 @@ export function extractConversations(dbPath: string): RawConversation[] {
       // Skip empty conversations
       if (bubbles.length === 0) continue;
 
-      // Extract file edits from codeBlockDiff entries
+      // Extract file edits from codeBlockDiff entries (using pre-loaded diffs)
       const diffMapping = buildDiffToFileMapping(data.codeBlockData);
-      const allFileEdits = extractCodeBlockDiffs(db, composerId, diffMapping);
+      const allFileEdits = extractCodeBlockDiffs(diffsByComposer, composerId, diffMapping);
 
       // Build a map of bubbleId -> original position in the conversation
       // This includes ALL bubbles, even tool-only ones without text

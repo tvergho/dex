@@ -1,8 +1,10 @@
 import { createHash } from 'crypto';
 import { getGlobalDatabase } from './paths';
-import { extractConversations, type RawConversation } from './parser';
+import { extractConversations, type RawConversation, type ExtractionProgress } from './parser';
 import { Source, type Conversation, type Message, type SourceRef, type ToolCall, type ConversationFile, type MessageFile, type FileEdit } from '../../schema/index';
 import type { SourceAdapter, SourceLocation, NormalizedConversation } from '../types';
+
+export type { ExtractionProgress } from './parser';
 
 export class CursorAdapter implements SourceAdapter {
   name = Source.Cursor;
@@ -25,8 +27,11 @@ export class CursorAdapter implements SourceAdapter {
     }];
   }
 
-  async extract(location: SourceLocation): Promise<RawConversation[]> {
-    return extractConversations(location.dbPath);
+  async extract(
+    location: SourceLocation,
+    onProgress?: (progress: ExtractionProgress) => void
+  ): Promise<RawConversation[]> {
+    return extractConversations(location.dbPath, onProgress);
   }
 
   normalize(raw: RawConversation, location: SourceLocation): NormalizedConversation {

@@ -188,6 +188,7 @@ interface FirstLoadSyncProgress {
   conversationsIndexed: number;
   messagesIndexed: number;
   embeddingStarted?: boolean;
+  extractionProgress?: { current: number; total: number };
 }
 
 // Run sync synchronously (blocking) - used only for first load
@@ -222,8 +223,19 @@ function runSyncBlocking(
         if (match) progress.currentSource = match[1];
       } else if (text.includes('Extracting')) {
         progress.phase = 'extracting';
-        const match = text.match(/Extracting (\w+)/);
-        if (match) progress.currentSource = match[1];
+        // Match "Extracting cursor (100/2609)..." or "Extracting cursor conversations..."
+        const matchWithProgress = text.match(/Extracting (\S+) \((\d+)\/(\d+)\)/);
+        const matchSimple = text.match(/Extracting (\S+)/);
+        if (matchWithProgress) {
+          progress.currentSource = matchWithProgress[1];
+          progress.extractionProgress = {
+            current: parseInt(matchWithProgress[2]!, 10),
+            total: parseInt(matchWithProgress[3]!, 10),
+          };
+        } else if (matchSimple) {
+          progress.currentSource = matchSimple[1];
+          progress.extractionProgress = undefined;
+        }
       } else if (text.includes('Syncing')) {
         progress.phase = 'syncing';
         const match = text.match(/Syncing (\w+)/);
@@ -408,7 +420,13 @@ function FirstLoadScreen({
     switch (progress.phase) {
       case 'detecting': return 'Detecting sources...';
       case 'discovering': return `Discovering ${progress.currentSource || ''}...`;
-      case 'extracting': return `Extracting ${progress.currentSource || ''} conversations...`;
+      case 'extracting': {
+        const source = progress.currentSource || '';
+        if (progress.extractionProgress) {
+          return `Extracting ${source} (${progress.extractionProgress.current}/${progress.extractionProgress.total})...`;
+        }
+        return `Extracting ${source} conversations...`;
+      }
       case 'syncing': return `Syncing ${progress.currentSource || ''}...`;
       case 'indexing': return 'Building search index...';
       case 'enriching': return 'Generating titles...';

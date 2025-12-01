@@ -16,6 +16,11 @@ export interface NormalizedConversation {
   fileEdits?: FileEdit[];
 }
 
+export interface ExtractionProgress {
+  current: number;
+  total: number;
+}
+
 export interface SourceAdapter {
   name: SourceType;
 
@@ -26,7 +31,10 @@ export interface SourceAdapter {
   discover(): Promise<SourceLocation[]>;
 
   /** Extract raw conversations from a source location */
-  extract(location: SourceLocation): Promise<unknown[]>;
+  extract(
+    location: SourceLocation,
+    onProgress?: (progress: ExtractionProgress) => void
+  ): Promise<unknown[]>;
 
   /** Convert raw conversation to unified schema */
   normalize(raw: unknown, location: SourceLocation): NormalizedConversation;

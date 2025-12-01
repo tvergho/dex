@@ -103,6 +103,7 @@ export interface SyncProgress {
   messagesIndexed: number;
   error?: string;
   embeddingStarted?: boolean;
+  extractionProgress?: { current: number; total: number };
   enrichmentProgress?: { current: number; total: number };
 }
 
@@ -201,7 +202,11 @@ function SyncUI({ progress }: { progress: SyncProgress }) {
         <Text>
           {progress.phase === 'detecting' && 'Detecting sources...'}
           {progress.phase === 'discovering' && `Discovering ${progress.currentSource}...`}
-          {progress.phase === 'extracting' && `Extracting ${progress.currentSource} conversations...`}
+          {progress.phase === 'extracting' && (
+            progress.extractionProgress
+              ? `Extracting ${progress.currentSource} (${progress.extractionProgress.current}/${progress.extractionProgress.total})...`
+              : `Extracting ${progress.currentSource} conversations...`
+          )}
           {progress.phase === 'syncing' && `Syncing ${progress.currentSource}...`}
           {progress.phase === 'indexing' && 'Building search index...'}
           {progress.phase === 'enriching' && (
@@ -278,49 +283,83 @@ export async function runSync(
     await connect();
     console.error('[sync] Database connected');
 
-    // ========== PHASE 1: Collect all data from all adapters ==========
+    // ========== PHASE 1: Collect all data from all adapters (PARALLEL) ==========
     // This is fast - just reading files, no DB operations yet
     const allConversations: { normalized: NormalizedConversation; adapter: typeof adapters[0]; location: SourceLocation }[] = [];
     const locationsToSync: { adapter: typeof adapters[0]; location: SourceLocation }[] = [];
 
-    // Process each adapter
-    for (const adapter of adapters) {
-      progress.currentSource = adapter.name;
-      progress.phase = 'detecting';
-      onProgress({ ...progress });
+    // Phase 1a: Detect all available adapters in parallel
+    progress.phase = 'detecting';
+    onProgress({ ...progress });
 
-      // Check if this source is available
-      const available = await adapter.detect();
-      if (!available) continue;
+    const adapterAvailability = await Promise.all(
+      adapters.map(async (adapter) => ({
+        adapter,
+        available: await adapter.detect(),
+      }))
+    );
+    const availableAdapters = adapterAvailability
+      .filter(({ available }) => available)
+      .map(({ adapter }) => adapter);
 
-      // Discover workspaces
-      progress.phase = 'discovering';
-      onProgress({ ...progress });
+    // Phase 1b: Discover all locations in parallel across adapters
+    progress.phase = 'discovering';
+    onProgress({ ...progress });
 
-      const locations = await adapter.discover();
+    const adapterLocations = await Promise.all(
+      availableAdapters.map(async (adapter) => ({
+        adapter,
+        locations: await adapter.discover(),
+      }))
+    );
 
-      // Extract from each location
-      progress.phase = 'extracting';
+    // Phase 1c: Filter locations that need syncing and extract in parallel
+    progress.phase = 'extracting';
+    progress.currentSource = 'all sources';
+    onProgress({ ...progress });
 
+    // Gather all locations that need syncing
+    const locationsNeedingSync: { adapter: typeof adapters[0]; location: SourceLocation }[] = [];
+
+    for (const { adapter, locations } of adapterLocations) {
       for (const location of locations) {
-        // Check if we need to sync this workspace
         if (!options.force) {
           const syncState = await syncStateRepo.get(adapter.name, location.dbPath);
           if (syncState && syncState.lastMtime >= location.mtime) {
-            // Skip - no changes since last sync
-            continue;
+            continue; // Skip - no changes since last sync
           }
         }
-
+        locationsNeedingSync.push({ adapter, location });
         locationsToSync.push({ adapter, location });
+      }
+    }
 
-        // Extract and normalize all conversations
-        const rawConversations = await adapter.extract(location);
+    // Extract from all locations in parallel (with concurrency limit to avoid overwhelming the system)
+    const EXTRACTION_CONCURRENCY = 4;
+    const extractionResults: { adapter: typeof adapters[0]; location: SourceLocation; rawConversations: unknown[] }[] = [];
 
-        for (const raw of rawConversations) {
-          const normalized = adapter.normalize(raw, location);
-          allConversations.push({ normalized, adapter, location });
-        }
+    for (let i = 0; i < locationsNeedingSync.length; i += EXTRACTION_CONCURRENCY) {
+      const batch = locationsNeedingSync.slice(i, i + EXTRACTION_CONCURRENCY);
+      const batchResults = await Promise.all(
+        batch.map(async ({ adapter, location }) => {
+          progress.currentSource = adapter.name;
+          progress.extractionProgress = undefined; // Reset for new extraction
+          onProgress({ ...progress });
+          const rawConversations = await adapter.extract(location, (extractionProg) => {
+            progress.extractionProgress = extractionProg;
+            onProgress({ ...progress });
+          });
+          return { adapter, location, rawConversations };
+        })
+      );
+      extractionResults.push(...batchResults);
+    }
+
+    // Normalize all conversations (this is CPU-bound but fast)
+    for (const { adapter, location, rawConversations } of extractionResults) {
+      for (const raw of rawConversations) {
+        const normalized = adapter.normalize(raw, location);
+        allConversations.push({ normalized, adapter, location });
       }
     }
 
@@ -373,15 +412,19 @@ export async function runSync(
         }
       }
 
-      // Delete related data for all conversations we're about to insert
-      for (const id of candidateIds) {
-        await Promise.all([
-          messageRepo.deleteByConversation(id),
-          toolCallRepo.deleteByConversation(id),
-          filesRepo.deleteByConversation(id),
-          messageFilesRepo.deleteByConversation(id),
-          fileEditsRepo.deleteByConversation(id),
-        ]);
+      // Delete related data for all conversations we're about to insert (in parallel batches)
+      const DELETE_BATCH_SIZE = 10;
+      for (let i = 0; i < candidateIds.length; i += DELETE_BATCH_SIZE) {
+        const batchIds = candidateIds.slice(i, i + DELETE_BATCH_SIZE);
+        await Promise.all(
+          batchIds.flatMap((id) => [
+            messageRepo.deleteByConversation(id),
+            toolCallRepo.deleteByConversation(id),
+            filesRepo.deleteByConversation(id),
+            messageFilesRepo.deleteByConversation(id),
+            fileEditsRepo.deleteByConversation(id),
+          ])
+        );
       }
     } else {
       // Incremental mode: only insert NEW conversations (skip existing ones)
@@ -438,34 +481,43 @@ export async function runSync(
       }
     }
 
-    // ========== PHASE 4: Bulk insert new data ==========
+    // ========== PHASE 4: Bulk insert new data (parallel writes to different tables) ==========
     // For incremental sync, we only add new data (no deletes needed)
+    // Conversations must be inserted first (foreign key dependency), then others in parallel
     await conversationRepo.bulkUpsert(newConvRows);
     progress.conversationsIndexed = newConvRows.length;
     progress.projectsProcessed = projectPaths.size;
     onProgress({ ...progress });
 
+    // Insert messages, tool calls, files, etc. in parallel (different tables)
+    const parallelInserts: Promise<void>[] = [];
+
     if (newMessages.length > 0) {
-      await messageRepo.bulkInsert(newMessages);
-      progress.messagesIndexed = newMessages.length;
-      onProgress({ ...progress });
+      parallelInserts.push(
+        messageRepo.bulkInsert(newMessages).then(() => {
+          progress.messagesIndexed = newMessages.length;
+          onProgress({ ...progress });
+        })
+      );
     }
 
     if (newToolCalls.length > 0) {
-      await toolCallRepo.bulkInsert(newToolCalls);
+      parallelInserts.push(toolCallRepo.bulkInsert(newToolCalls));
     }
 
     if (newFiles.length > 0) {
-      await filesRepo.bulkInsert(newFiles);
+      parallelInserts.push(filesRepo.bulkInsert(newFiles));
     }
 
     if (newMessageFiles.length > 0) {
-      await messageFilesRepo.bulkInsert(newMessageFiles);
+      parallelInserts.push(messageFilesRepo.bulkInsert(newMessageFiles));
     }
 
     if (newFileEdits.length > 0) {
-      await fileEditsRepo.bulkInsert(newFileEdits);
+      parallelInserts.push(fileEditsRepo.bulkInsert(newFileEdits));
     }
+
+    await Promise.all(parallelInserts);
 
     // ========== PHASE 5: Update sync state ==========
     for (const { adapter, location } of locationsToSync) {

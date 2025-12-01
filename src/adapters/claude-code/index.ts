@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { detectClaudeCode, discoverProjects } from './paths.js';
 import { extractConversations, type RawConversation } from './parser.js';
 import { Source, type Conversation, type Message, type SourceRef, type ToolCall, type ConversationFile, type MessageFile, type FileEdit } from '../../schema/index.js';
-import type { SourceAdapter, SourceLocation, NormalizedConversation } from '../types.js';
+import type { SourceAdapter, SourceLocation, NormalizedConversation, ExtractionProgress } from '../types.js';
 
 export class ClaudeCodeAdapter implements SourceAdapter {
   name = Source.ClaudeCode;
@@ -22,7 +22,10 @@ export class ClaudeCodeAdapter implements SourceAdapter {
     }));
   }
 
-  async extract(location: SourceLocation): Promise<RawConversation[]> {
+  async extract(
+    location: SourceLocation,
+    _onProgress?: (progress: ExtractionProgress) => void
+  ): Promise<RawConversation[]> {
     // Find the project that matches this location
     const projects = discoverProjects();
     const project = projects.find((p) => p.sessionsDir === location.dbPath);

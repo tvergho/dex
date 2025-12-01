@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { detectCodex, discoverSessions } from './paths.js';
 import { extractConversation, type RawConversation } from './parser.js';
 import { Source, type Conversation, type Message, type SourceRef, type ToolCall, type ConversationFile, type MessageFile, type FileEdit } from '../../schema/index.js';
-import type { SourceAdapter, SourceLocation, NormalizedConversation } from '../types.js';
+import type { SourceAdapter, SourceLocation, NormalizedConversation, ExtractionProgress } from '../types.js';
 
 export class CodexAdapter implements SourceAdapter {
   name = Source.Codex;
@@ -25,7 +25,10 @@ export class CodexAdapter implements SourceAdapter {
     }));
   }
 
-  async extract(location: SourceLocation): Promise<RawConversation[]> {
+  async extract(
+    location: SourceLocation,
+    _onProgress?: (progress: ExtractionProgress) => void
+  ): Promise<RawConversation[]> {
     // Extract session ID from the file path
     const match = location.dbPath.match(/rollout-[\d-T]+-([a-f0-9-]+)\.jsonl$/);
     const sessionId = match?.[1] || location.dbPath;
