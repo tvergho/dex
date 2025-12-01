@@ -73,6 +73,7 @@ function ConfigApp() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [generationProgress, setGenerationProgress] = useState<EnrichmentProgress | null>(null);
+  const [recentlyGeneratedIds, setRecentlyGeneratedIds] = useState<string[]>([]);
   const [frame, setFrame] = useState(0);
   const spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -126,6 +127,15 @@ function ConfigApp() {
       menuItems.push({
         id: 'generate',
         label: `Generate titles for ${untitledCount} untitled`,
+        type: 'action',
+        section: 'titles',
+      });
+    }
+
+    if (recentlyGeneratedIds.length > 0) {
+      menuItems.push({
+        id: 'reset',
+        label: `Reset ${recentlyGeneratedIds.length} generated title${recentlyGeneratedIds.length === 1 ? '' : 's'}`,
         type: 'action',
         section: 'titles',
       });
@@ -184,11 +194,14 @@ function ConfigApp() {
           recentTitles: [],
         });
 
+        const generatedIds: string[] = [];
         const result = await enrichUntitledConversations({
           onProgress: (progress) => setGenerationProgress(progress),
+          onTitleGenerated: (convId) => generatedIds.push(convId),
         });
 
         setGenerationProgress(null);
+        setRecentlyGeneratedIds(generatedIds);
 
         const newCount = await conversationRepo.countUntitled();
         setUntitledCount(newCount);
@@ -196,6 +209,22 @@ function ConfigApp() {
         setToast({
           message: `Generated ${result.enriched} title${result.enriched === 1 ? '' : 's'}${result.failed > 0 ? `, ${result.failed} failed` : ''}`,
           type: result.failed > 0 ? 'error' : 'success',
+        });
+      } else if (item.id === 'reset') {
+        // Reset recently generated titles back to "Untitled"
+        for (const convId of recentlyGeneratedIds) {
+          await conversationRepo.updateTitle(convId, 'Untitled');
+        }
+
+        const resetCount = recentlyGeneratedIds.length;
+        setRecentlyGeneratedIds([]);
+
+        const newCount = await conversationRepo.countUntitled();
+        setUntitledCount(newCount);
+
+        setToast({
+          message: `Reset ${resetCount} title${resetCount === 1 ? '' : 's'} to "Untitled"`,
+          type: 'info',
         });
       }
     } catch (err) {
@@ -205,7 +234,7 @@ function ConfigApp() {
         type: 'error',
       });
     }
-  }, [config, selectableItems, selectedIndex, untitledCount]);
+  }, [config, selectableItems, selectedIndex, untitledCount, recentlyGeneratedIds]);
 
   useInput((input, key) => {
     if (input === 'q' || key.escape) {
@@ -249,272 +278,196 @@ function ConfigApp() {
     );
   }
 
-  const innerWidth = Math.max(60, width - 6);
-  const cardWidth = innerWidth - 4;
+  const cardWidth = Math.max(50, width - 4);
   const subsectionWidth = cardWidth - 6;
+
+  // Footer key hint components (matching search.tsx style)
+  const Key = ({ k }: { k: string }) => <Text color="white">{k}</Text>;
+  const Sep = () => <Text dimColor> · </Text>;
 
   return (
     <Box width={width} height={height} flexDirection="column">
-      {/* Outer top border */}
-      <Box>
-        <Text color="gray">┌{'─'.repeat(width - 2)}┐</Text>
-      </Box>
-
       {/* Header */}
-      <Box>
-        <Text color="gray">│</Text>
-        <Text>  </Text>
-        <Text bold>⚙  Settings</Text>
-        <Text>{' '.repeat(Math.max(0, width - 16))}</Text>
-        <Text color="gray">│</Text>
-      </Box>
-
-      {/* Header divider */}
-      <Box>
-        <Text color="gray">├{'─'.repeat(width - 2)}┤</Text>
-      </Box>
-
-      {/* Empty line */}
-      <Box>
-        <Text color="gray">│</Text>
-        <Text>{' '.repeat(width - 2)}</Text>
-        <Text color="gray">│</Text>
+      <Box flexDirection="column" marginBottom={1}>
+        <Box paddingX={1}>
+          <Text bold>⚙  Settings</Text>
+        </Box>
+        <Box paddingX={1}>
+          <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
+        </Box>
       </Box>
 
       {/* Claude Code Card */}
-      <Box>
-        <Text color="gray">│</Text>
-        <Text>  </Text>
-        <Text color="gray">┌─ </Text>
-        <Text bold>Claude Code</Text>
-        <Text color="gray"> {'─'.repeat(Math.max(0, cardWidth - 16))}</Text>
-        <Text>  </Text>
-        <Text color="gray">│</Text>
-      </Box>
+      <Box flexDirection="column" paddingX={1} marginBottom={1}>
+        <Box>
+          <Text color="gray">┌─ </Text>
+          <Text bold>Claude Code</Text>
+          <Text color="gray"> {'─'.repeat(Math.max(0, cardWidth - 14))}</Text>
+        </Box>
 
-      {/* Status row */}
-      <Box>
-        <Text color="gray">│  │  </Text>
-        {claudeCodeConnected ? (
-          <>
-            <Text color="green">● Connected</Text>
-            <Text>{' '.repeat(Math.max(0, cardWidth - 30))}</Text>
-            <Text dimColor>{credentialStatus?.subscriptionType || ''}</Text>
-          </>
-        ) : (
-          <>
-            <Text color="yellow">○ Not connected</Text>
-            <Text>{' '.repeat(Math.max(0, cardWidth - 16))}</Text>
-          </>
-        )}
-        <Text color="gray">  │  │</Text>
-      </Box>
-
-      {/* Empty line in card */}
-      <Box>
-        <Text color="gray">│  │</Text>
-        <Text>{' '.repeat(cardWidth)}</Text>
-        <Text color="gray">│  │</Text>
-      </Box>
-
-      {/* Menu items in Claude Code card */}
-      {selectableItems.filter(i => i.section === 'claude-code' || i.section === undefined).map((item) => {
-        const actualIdx = selectableItems.indexOf(item);
-        const isSelected = actualIdx === selectedIndex;
-        const isDisconnect = item.id === 'disconnect';
-        const labelLen = item.label.length + (item.type === 'toggle' ? 5 : 0);
-        const padding = Math.max(0, cardWidth - labelLen - 4);
-
-        return (
-          <Box key={item.id}>
-            <Text color="gray">│  │  </Text>
-            <Text color={isSelected ? 'cyan' : 'white'}>{isSelected ? '▸ ' : '  '}</Text>
-            {item.type === 'toggle' && (
-              <Text color={item.value ? 'green' : 'gray'}>[{item.value ? '✓' : ' '}] </Text>
-            )}
-            <Text color={isSelected ? 'cyan' : isDisconnect ? 'red' : 'white'}>{item.label}</Text>
-            <Text>{' '.repeat(padding)}</Text>
-            <Text color="gray">│  │</Text>
-          </Box>
-        );
-      })}
-
-      {/* Titles subsection */}
-      {claudeCodeConnected && (
-        <>
-          {/* Empty line */}
-          <Box>
-            <Text color="gray">│  │</Text>
-            <Text>{' '.repeat(cardWidth)}</Text>
-            <Text color="gray">│  │</Text>
-          </Box>
-
-          {/* Subsection header */}
-          <Box>
-            <Text color="gray">│  │  ╭─ </Text>
-            <Text dimColor>Titles from past conversations</Text>
-            <Text color="gray"> {'─'.repeat(Math.max(0, subsectionWidth - 32))}╮</Text>
-            <Text color="gray">  │  │</Text>
-          </Box>
-
-          {generationProgress ? (
+        {/* Status row */}
+        <Box>
+          <Text color="gray">│  </Text>
+          {claudeCodeConnected ? (
             <>
-              {/* Progress bar */}
-              <Box>
-                <Text color="gray">│  │  │  </Text>
-                <ProgressBar
-                  current={generationProgress.completed}
-                  total={generationProgress.total}
-                  width={Math.min(40, subsectionWidth - 4)}
-                />
-                <Text>{' '.repeat(Math.max(0, subsectionWidth - 56))}</Text>
-                <Text color="gray">│  │  │</Text>
-              </Box>
-
-              {/* Recent completions */}
-              {generationProgress.recentTitles.slice(-3).map((item) => (
-                <Box key={item.id}>
-                  <Text color="gray">│  │  │  </Text>
-                  <Text color="green">✓ </Text>
-                  <Text>
-                    {item.title.length > subsectionWidth - 8
-                      ? item.title.slice(0, subsectionWidth - 11) + '...'
-                      : item.title}
-                  </Text>
-                  <Text>{' '.repeat(Math.max(0, subsectionWidth - item.title.length - 4))}</Text>
-                  <Text color="gray">│  │  │</Text>
-                </Box>
-              ))}
-
-              {/* In-flight indicator */}
-              {generationProgress.inFlight > 0 && (
-                <Box>
-                  <Text color="gray">│  │  │  </Text>
-                  <Text color="cyan">{spinner[frame]} </Text>
-                  <Text dimColor>{generationProgress.inFlight} generating...</Text>
-                  <Text>{' '.repeat(Math.max(0, subsectionWidth - 20))}</Text>
-                  <Text color="gray">│  │  │</Text>
-                </Box>
+              <Text color="green">● Connected</Text>
+              {credentialStatus?.subscriptionType && (
+                <Text dimColor> ({credentialStatus.subscriptionType})</Text>
               )}
             </>
-          ) : untitledCount === 0 ? (
-            <Box>
-              <Text color="gray">│  │  │  </Text>
-              <Text color="green">✓ </Text>
-              <Text dimColor>All conversations have titles</Text>
-              <Text>{' '.repeat(Math.max(0, subsectionWidth - 32))}</Text>
-              <Text color="gray">│  │  │</Text>
-            </Box>
           ) : (
-            <>
-              <Box>
-                <Text color="gray">│  │  │  </Text>
-                <Text dimColor>{untitledCount} untitled conversation{untitledCount === 1 ? '' : 's'} found</Text>
-                <Text>{' '.repeat(Math.max(0, subsectionWidth - 30))}</Text>
-                <Text color="gray">│  │  │</Text>
-              </Box>
-              {selectableItems.filter(i => i.section === 'titles').map((item) => {
-                const actualIdx = selectableItems.indexOf(item);
-                const isSelected = actualIdx === selectedIndex;
-
-                return (
-                  <Box key={item.id}>
-                    <Text color="gray">│  │  │  </Text>
-                    <Text color={isSelected ? 'cyan' : 'white'}>{isSelected ? '▸ ' : '  '}</Text>
-                    <Text color={isSelected ? 'cyan' : 'blue'}>[Generate Now]</Text>
-                    <Text>{' '.repeat(Math.max(0, subsectionWidth - 18))}</Text>
-                    <Text color="gray">│  │  │</Text>
-                  </Box>
-                );
-              })}
-            </>
+            <Text color="yellow">○ Not connected</Text>
           )}
+        </Box>
 
-          {/* Subsection bottom */}
-          <Box>
-            <Text color="gray">│  │  ╰{'─'.repeat(subsectionWidth)}╯  │  │</Text>
-          </Box>
-        </>
-      )}
+        <Box>
+          <Text color="gray">│</Text>
+        </Box>
 
-      {/* Card bottom */}
-      <Box>
-        <Text color="gray">│  └{'─'.repeat(cardWidth)}┘  │</Text>
-      </Box>
+        {/* Menu items */}
+        {selectableItems.filter(i => i.section === 'claude-code' || i.section === undefined).map((item) => {
+          const actualIdx = selectableItems.indexOf(item);
+          const isSelected = actualIdx === selectedIndex;
+          const isDisconnect = item.id === 'disconnect';
 
-      {/* Empty line */}
-      <Box>
-        <Text color="gray">│</Text>
-        <Text>{' '.repeat(width - 2)}</Text>
-        <Text color="gray">│</Text>
+          return (
+            <Box key={item.id}>
+              <Text color="gray">│  </Text>
+              <Text color={isSelected ? 'cyan' : 'white'}>{isSelected ? '▸ ' : '  '}</Text>
+              {item.type === 'toggle' && (
+                <Text color={item.value ? 'green' : 'gray'}>[{item.value ? '✓' : ' '}] </Text>
+              )}
+              <Text color={isSelected ? 'cyan' : isDisconnect ? 'red' : 'white'}>{item.label}</Text>
+            </Box>
+          );
+        })}
+
+        {/* Titles subsection */}
+        {claudeCodeConnected && (
+          <>
+            <Box>
+              <Text color="gray">│</Text>
+            </Box>
+            <Box>
+              <Text color="gray">│  ╭─ </Text>
+              <Text dimColor>Titles from past conversations</Text>
+              <Text color="gray"> {'─'.repeat(Math.max(0, subsectionWidth - 30))}╮</Text>
+            </Box>
+
+            {generationProgress ? (
+              <>
+                <Box>
+                  <Text color="gray">│  │  </Text>
+                  <ProgressBar
+                    current={generationProgress.completed}
+                    total={generationProgress.total}
+                    width={Math.min(40, subsectionWidth - 4)}
+                  />
+                </Box>
+                {/* Deduplicate by title for display */}
+                {generationProgress.recentTitles
+                  .slice(-6)
+                  .filter((item, idx, arr) => arr.findIndex(x => x.title === item.title) === idx)
+                  .slice(-3)
+                  .map((item) => (
+                  <Box key={item.id}>
+                    <Text color="gray">│  │  </Text>
+                    <Text color="green">✓ </Text>
+                    <Text>{item.title.length > 50 ? item.title.slice(0, 47) + '...' : item.title}</Text>
+                  </Box>
+                ))}
+                {generationProgress.inFlight > 0 && (
+                  <Box>
+                    <Text color="gray">│  │  </Text>
+                    <Text color="cyan">{spinner[frame]} </Text>
+                    <Text dimColor>{generationProgress.inFlight} generating...</Text>
+                  </Box>
+                )}
+              </>
+            ) : (
+              <>
+                {untitledCount === 0 ? (
+                  <Box>
+                    <Text color="gray">│  │  </Text>
+                    <Text color="green">✓ </Text>
+                    <Text dimColor>All conversations have titles</Text>
+                  </Box>
+                ) : (
+                  <Box>
+                    <Text color="gray">│  │  </Text>
+                    <Text dimColor>{untitledCount} untitled conversation{untitledCount === 1 ? '' : 's'} found</Text>
+                  </Box>
+                )}
+                {selectableItems.filter(i => i.section === 'titles').map((item) => {
+                  const actualIdx = selectableItems.indexOf(item);
+                  const isSelected = actualIdx === selectedIndex;
+                  const isReset = item.id === 'reset';
+
+                  return (
+                    <Box key={item.id}>
+                      <Text color="gray">│  │  </Text>
+                      <Text color={isSelected ? 'cyan' : 'white'}>{isSelected ? '▸ ' : '  '}</Text>
+                      <Text color={isSelected ? 'cyan' : isReset ? 'yellow' : 'blue'}>
+                        [{isReset ? `Reset ${recentlyGeneratedIds.length}` : 'Generate Now'}]
+                      </Text>
+                    </Box>
+                  );
+                })}
+              </>
+            )}
+
+            <Box>
+              <Text color="gray">│  ╰{'─'.repeat(Math.max(0, subsectionWidth))}╯</Text>
+            </Box>
+          </>
+        )}
+
+        {/* Card bottom */}
+        <Box>
+          <Text color="gray">└{'─'.repeat(Math.max(0, cardWidth))}┘</Text>
+        </Box>
       </Box>
 
       {/* Codex Card */}
-      <Box>
-        <Text color="gray">│</Text>
-        <Text>  </Text>
-        <Text color="gray">┌─ </Text>
-        <Text bold>Codex</Text>
-        <Text color="gray"> {'─'.repeat(Math.max(0, cardWidth - 9))}</Text>
-        <Text>  </Text>
-        <Text color="gray">│</Text>
+      <Box flexDirection="column" paddingX={1}>
+        <Box>
+          <Text color="gray">┌─ </Text>
+          <Text bold>Codex</Text>
+          <Text color="gray"> {'─'.repeat(Math.max(0, cardWidth - 7))}</Text>
+        </Box>
+        <Box>
+          <Text color="gray">│  </Text>
+          <Text color="yellow">○ Not connected</Text>
+          <Text dimColor>  Coming soon</Text>
+        </Box>
+        <Box>
+          <Text color="gray">└{'─'.repeat(Math.max(0, cardWidth))}┘</Text>
+        </Box>
       </Box>
 
-      <Box>
-        <Text color="gray">│  │  </Text>
-        <Text color="yellow">○ Not connected</Text>
-        <Text>{' '.repeat(Math.max(0, cardWidth - 28))}</Text>
-        <Text dimColor>Coming soon</Text>
-        <Text color="gray">  │  │</Text>
-      </Box>
-
-      <Box>
-        <Text color="gray">│  └{'─'.repeat(cardWidth)}┘  │</Text>
-      </Box>
-
-      {/* Spacer rows */}
-      <Box flexGrow={1} flexDirection="column">
-        {Array.from({ length: Math.max(0, height - 25) }).map((_, i) => (
-          <Box key={i}>
-            <Text color="gray">│</Text>
-            <Text>{' '.repeat(width - 2)}</Text>
-            <Text color="gray">│</Text>
-          </Box>
-        ))}
-      </Box>
+      {/* Spacer */}
+      <Box flexGrow={1} />
 
       {/* Toast */}
       {toast && (
-        <Box>
-          <Text color="gray">│  </Text>
+        <Box paddingX={1} marginBottom={1}>
           <Text color={toast.type === 'success' ? 'green' : toast.type === 'error' ? 'red' : 'cyan'}>
             {toast.message}
           </Text>
-          <Text>{' '.repeat(Math.max(0, width - toast.message.length - 5))}</Text>
-          <Text color="gray">│</Text>
         </Box>
       )}
 
-      {/* Footer divider */}
-      <Box>
-        <Text color="gray">├{'─'.repeat(width - 2)}┤</Text>
-      </Box>
-
       {/* Footer */}
-      <Box>
-        <Text color="gray">│</Text>
-        <Text>  </Text>
-        <Text dimColor>↑↓</Text><Text> navigate  </Text>
-        <Text dimColor>␣</Text><Text> toggle  </Text>
-        <Text dimColor>⏎</Text><Text> select  </Text>
-        <Text dimColor>q</Text><Text> quit</Text>
-        <Text>{' '.repeat(Math.max(0, width - 46))}</Text>
-        <Text color="gray">│</Text>
-      </Box>
-
-      {/* Outer bottom border */}
-      <Box>
-        <Text color="gray">└{'─'.repeat(width - 2)}┘</Text>
+      <Box flexDirection="column">
+        <Box paddingX={1}>
+          <Text color="gray">{'─'.repeat(Math.max(0, width - 2))}</Text>
+        </Box>
+        <Box paddingX={1}>
+          <Key k="j/k" /><Text dimColor>: navigate</Text><Sep />
+          <Key k="Space" /><Text dimColor>: toggle</Text><Sep />
+          <Key k="Enter" /><Text dimColor>: select</Text><Sep />
+          <Key k="q" /><Text dimColor>: quit</Text>
+        </Box>
       </Box>
     </Box>
   );
