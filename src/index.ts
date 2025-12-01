@@ -16,7 +16,7 @@ import { embedCommand } from './cli/commands/embed';
 const program = new Command()
   .name('dex')
   .description('Universal search for your coding agent conversations')
-  .version('0.1.2');
+  .version('0.1.3');
 
 program
   .command('sync')
