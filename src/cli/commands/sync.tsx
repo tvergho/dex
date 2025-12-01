@@ -527,6 +527,10 @@ export async function runSync(
     progress.currentSource = undefined;
     progress.currentProject = undefined;
     onProgress({ ...progress });
+
+    // Force exit after a brief delay to let UI render and embed process spawn
+    // This avoids LanceDB native binding cleanup crash
+    setTimeout(() => process.exit(0), 1000);
   } catch (error) {
     progress.phase = 'error';
     progress.error = error instanceof Error ? error.message : String(error);
@@ -561,6 +565,6 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
   const { waitUntilExit } = render(<SyncApp options={options} />);
   await waitUntilExit();
 
-  // Show summary stats after sync completes
-  await printRichSummary(7);
+  // Note: process.exit(0) is called in runSync() after phase='done'
+  // to avoid LanceDB native binding cleanup crash
 }

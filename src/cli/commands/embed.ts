@@ -694,4 +694,7 @@ export async function embedCommand(options: EmbedOptions = {}): Promise<void> {
   } else {
     await runBackgroundEmbedding();
   }
+
+  // Force exit to avoid LanceDB native binding cleanup crash
+  process.exit(0);
 }
