@@ -344,13 +344,13 @@ function HelpOverlay({ width, height }: { width: number; height: number }) {
 
       {/* Content */}
       {buildRow(' source:name  Filter by source')}
-      {buildRow('   cursor, claude-code, codex, opencode', 'gray', 'gray')}
+      {buildRow('   cursor, claude-code, codex, opencode', 'gray', 'whiteBright')}
       {buildRow(' ')}
       {buildRow(' model:name   Filter by model')}
-      {buildRow('   opus, sonnet, gpt-4, etc.', 'gray', 'gray')}
+      {buildRow('   opus, sonnet, gpt-4, etc.', 'gray', 'whiteBright')}
       {buildRow(' ')}
       {buildRow(' file:path    Filter by file path')}
-      {buildRow('   auth.ts, src/components, etc.', 'gray', 'gray')}
+      {buildRow('   auth.ts, src/components, etc.', 'gray', 'whiteBright')}
 
       {/* Divider */}
       <Text backgroundColor="gray" color="white">
@@ -359,9 +359,9 @@ function HelpOverlay({ width, height }: { width: number; height: number }) {
 
       {/* Examples */}
       {buildRow(' Examples', 'gray', 'white')}
-      {buildRow('   source:codex', 'gray', 'gray')}
-      {buildRow('   file:auth.ts fix bug', 'gray', 'gray')}
-      {buildRow('   source:cursor file:components', 'gray', 'gray')}
+      {buildRow('   source:codex', 'gray', 'whiteBright')}
+      {buildRow('   file:auth.ts fix bug', 'gray', 'whiteBright')}
+      {buildRow('   source:cursor file:components', 'gray', 'whiteBright')}
 
       {/* Divider */}
       <Text backgroundColor="gray" color="white">
