@@ -4,7 +4,7 @@
  * Usage: dex config
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index.js';
@@ -84,6 +84,11 @@ function ConfigApp() {
   const [recentlyGeneratedIds, setRecentlyGeneratedIds] = useState<{ provider: ProviderId; ids: string[] } | null>(null);
   const [frame, setFrame] = useState(0);
   const spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+  // Throttle progress updates to reduce flickering
+  const lastProgressUpdate = useRef(0);
+  const pendingProgress = useRef<EnrichmentProgress | null>(null);
+  const PROGRESS_THROTTLE_MS = 150;
 
   // Load initial state
   useEffect(() => {
@@ -326,11 +331,24 @@ function ConfigApp() {
         const result = await enrichWithProvider(providerId, {
           source,
           callbacks: {
-            onProgress: (progress) => setGenerationProgress(progress),
+            onProgress: (progress) => {
+              // Throttle progress updates to reduce flickering
+              const now = Date.now();
+              pendingProgress.current = progress;
+              if (now - lastProgressUpdate.current >= PROGRESS_THROTTLE_MS) {
+                lastProgressUpdate.current = now;
+                setGenerationProgress(progress);
+              }
+            },
             onTitleGenerated: (convId) => generatedIds.push(convId),
           },
         });
 
+        // Always show final state
+        if (pendingProgress.current) {
+          setGenerationProgress(pendingProgress.current);
+        }
+        pendingProgress.current = null;
         setGenerationProgress(null);
         setGeneratingProvider(null);
         setRecentlyGeneratedIds({ provider: providerId, ids: generatedIds });
@@ -412,10 +430,10 @@ function ConfigApp() {
 
   // Spinner animation for generation
   useEffect(() => {
-    if (!generationProgress) return;
-    const timer = setInterval(() => setFrame((f) => (f + 1) % spinner.length), 80);
+    if (!generationProgress && !authenticating) return;
+    const timer = setInterval(() => setFrame((f) => (f + 1) % spinner.length), 120);
     return () => clearInterval(timer);
-  }, [generationProgress, spinner.length]);
+  }, [generationProgress, authenticating, spinner.length]);
 
   if (loading) {
     return (
