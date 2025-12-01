@@ -39,6 +39,28 @@ export interface EnrichmentCallbacks {
 
 const CONCURRENCY = 4; // Number of parallel requests
 
+export type ProviderId = 'claudeCode' | 'codex';
+
+/**
+ * Create a client for a specific provider
+ */
+async function createClientForProvider(
+  providerId: ProviderId
+): Promise<{ client: PromptClient; provider: string } | null> {
+  if (providerId === 'claudeCode') {
+    const client = await createClaudeCodeClient();
+    if (client) {
+      return { client, provider: 'Claude Code' };
+    }
+  } else if (providerId === 'codex') {
+    const client = await createCodexClient();
+    if (client) {
+      return { client, provider: 'Codex' };
+    }
+  }
+  return null;
+}
+
 /**
  * Create an enrichment client using the highest-priority available provider
  *
@@ -51,18 +73,14 @@ async function createEnrichmentClient(): Promise<{ client: PromptClient; provide
 
   // Priority 1: Claude Code (if connected)
   if (config.providers.claudeCode.enabled) {
-    const client = await createClaudeCodeClient();
-    if (client) {
-      return { client, provider: 'Claude Code' };
-    }
+    const result = await createClientForProvider('claudeCode');
+    if (result) return result;
   }
 
   // Priority 2: Codex/ChatGPT (if connected)
   if (config.providers.codex.enabled) {
-    const client = await createCodexClient();
-    if (client) {
-      return { client, provider: 'Codex' };
-    }
+    const result = await createClientForProvider('codex');
+    if (result) return result;
   }
 
   return null;
@@ -359,4 +377,102 @@ export function getActiveEnrichmentProvider(): string | null {
   }
 
   return null;
+}
+
+/**
+ * Enrich untitled conversations using a specific provider
+ *
+ * @param providerId - Which provider to use ('claudeCode' or 'codex')
+ * @param callbacks - Progress and completion callbacks
+ * @returns Enrichment result with counts and provider used
+ */
+export async function enrichWithProvider(
+  providerId: ProviderId,
+  callbacks?: EnrichmentCallbacks | ((current: number, total: number) => void)
+): Promise<EnrichmentResult & { provider?: string }> {
+  // Get untitled conversations
+  const untitled = await conversationRepo.findUntitled(100);
+
+  if (untitled.length === 0) {
+    return { enriched: 0, failed: 0, skipped: 0 };
+  }
+
+  // Normalize callbacks
+  const cb: EnrichmentCallbacks = typeof callbacks === 'function'
+    ? { onProgress: (p) => callbacks(p.completed, p.total) }
+    : callbacks ?? {};
+
+  // Create client for the specific provider
+  const clientInfo = await createClientForProvider(providerId);
+  if (!clientInfo) {
+    return { enriched: 0, failed: untitled.length, skipped: 0 };
+  }
+
+  const { client, provider } = clientInfo;
+
+  const result: EnrichmentResult = {
+    enriched: 0,
+    failed: 0,
+    skipped: 0,
+  };
+
+  const recentTitles: Array<{ id: string; title: string }> = [];
+  let inFlight = 0;
+
+  const reportProgress = () => {
+    cb.onProgress?.({
+      completed: result.enriched + result.failed + result.skipped,
+      total: untitled.length,
+      inFlight,
+      recentTitles: recentTitles.slice(-6),
+    });
+  };
+
+  try {
+    // Process in parallel batches
+    const queue = [...untitled];
+    const processing: Promise<void>[] = [];
+
+    const processNext = async (): Promise<void> => {
+      const conv = queue.shift();
+      if (!conv) return;
+
+      inFlight++;
+      reportProgress();
+
+      const outcome = await processConversation(client, conv.id);
+
+      inFlight--;
+
+      if ('skipped' in outcome) {
+        result.skipped++;
+      } else if ('error' in outcome) {
+        result.failed++;
+        cb.onError?.(conv.id, outcome.error);
+      } else {
+        result.enriched++;
+        recentTitles.push({ id: conv.id, title: outcome.title });
+        cb.onTitleGenerated?.(conv.id, outcome.title);
+      }
+
+      reportProgress();
+
+      // Process next item if queue not empty
+      if (queue.length > 0) {
+        await processNext();
+      }
+    };
+
+    // Start initial batch of concurrent workers
+    for (let i = 0; i < Math.min(CONCURRENCY, untitled.length); i++) {
+      processing.push(processNext());
+    }
+
+    // Wait for all to complete
+    await Promise.all(processing);
+  } finally {
+    await client.close();
+  }
+
+  return { ...result, provider };
 }

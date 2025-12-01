@@ -22,9 +22,9 @@ import {
 } from '../../providers/index.js';
 import {
   countUntitledConversations,
-  enrichUntitledConversations,
-  getActiveEnrichmentProvider,
+  enrichWithProvider,
   type EnrichmentProgress,
+  type ProviderId,
 } from '../../features/enrichment/index.js';
 import { conversationRepo } from '../../db/repository.js';
 
@@ -79,7 +79,8 @@ function ConfigApp() {
   const [authenticating, setAuthenticating] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [generationProgress, setGenerationProgress] = useState<EnrichmentProgress | null>(null);
-  const [recentlyGeneratedIds, setRecentlyGeneratedIds] = useState<string[]>([]);
+  const [generatingProvider, setGeneratingProvider] = useState<ProviderId | null>(null);
+  const [recentlyGeneratedIds, setRecentlyGeneratedIds] = useState<{ provider: ProviderId; ids: string[] } | null>(null);
   const [frame, setFrame] = useState(0);
   const spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -115,7 +116,6 @@ function ConfigApp() {
   const menuItems: MenuItem[] = [];
   const claudeCodeConnected = config?.providers.claudeCode.enabled ?? false;
   const codexConnected = config?.providers.codex.enabled ?? false;
-  const anyProviderConnected = claudeCodeConnected || codexConnected;
 
   // Claude Code menu items
   if (config && claudeCodeConnected) {
@@ -133,6 +133,26 @@ function ConfigApp() {
       type: 'button',
       section: 'claude-code',
     });
+
+    // Generate button for Claude Code
+    if (untitledCount > 0) {
+      menuItems.push({
+        id: 'claude-generate',
+        label: `Generate ${untitledCount} titles`,
+        type: 'action',
+        section: 'claude-code',
+      });
+    }
+
+    // Reset button if titles were generated via Claude Code
+    if (recentlyGeneratedIds?.provider === 'claudeCode' && recentlyGeneratedIds.ids.length > 0) {
+      menuItems.push({
+        id: 'claude-reset',
+        label: `Reset ${recentlyGeneratedIds.ids.length} generated`,
+        type: 'action',
+        section: 'claude-code',
+      });
+    }
   } else if (config && credentialStatus?.isAuthenticated) {
     menuItems.push({
       id: 'claude-connect',
@@ -158,6 +178,26 @@ function ConfigApp() {
       type: 'button',
       section: 'codex',
     });
+
+    // Generate button for Codex
+    if (untitledCount > 0) {
+      menuItems.push({
+        id: 'codex-generate',
+        label: `Generate ${untitledCount} titles`,
+        type: 'action',
+        section: 'codex',
+      });
+    }
+
+    // Reset button if titles were generated via Codex
+    if (recentlyGeneratedIds?.provider === 'codex' && recentlyGeneratedIds.ids.length > 0) {
+      menuItems.push({
+        id: 'codex-reset',
+        label: `Reset ${recentlyGeneratedIds.ids.length} generated`,
+        type: 'action',
+        section: 'codex',
+      });
+    }
   } else if (config) {
     // Codex connect - always available (will trigger auth if no creds)
     menuItems.push({
@@ -166,27 +206,6 @@ function ConfigApp() {
       type: 'button',
       section: 'codex',
     });
-  }
-
-  // Titles section - shown when any provider is connected
-  if (anyProviderConnected) {
-    if (untitledCount > 0) {
-      menuItems.push({
-        id: 'generate',
-        label: `Generate titles for ${untitledCount} untitled`,
-        type: 'action',
-        section: 'titles',
-      });
-    }
-
-    if (recentlyGeneratedIds.length > 0) {
-      menuItems.push({
-        id: 'reset',
-        label: `Reset ${recentlyGeneratedIds.length} generated title${recentlyGeneratedIds.length === 1 ? '' : 's'}`,
-        type: 'action',
-        section: 'titles',
-      });
-    }
   }
 
   const selectableItems = menuItems.filter((item) => !item.disabled);
@@ -221,6 +240,10 @@ function ConfigApp() {
           autoEnrichSummaries: false,
         });
         setConfig(newConfig);
+        // Clear generated IDs if they were from Claude Code
+        if (recentlyGeneratedIds?.provider === 'claudeCode') {
+          setRecentlyGeneratedIds(null);
+        }
         setToast({ message: 'Disconnected from Claude Code', type: 'info' });
       } else if (item.id === 'claude-auto-enrich') {
         const newConfig = updateProviderConfig('claudeCode', {
@@ -268,6 +291,10 @@ function ConfigApp() {
           autoEnrichSummaries: false,
         });
         setConfig(newConfig);
+        // Clear generated IDs if they were from Codex
+        if (recentlyGeneratedIds?.provider === 'codex') {
+          setRecentlyGeneratedIds(null);
+        }
         setToast({ message: 'Disconnected from Codex', type: 'info' });
       } else if (item.id === 'codex-auto-enrich') {
         const newConfig = updateProviderConfig('codex', {
@@ -275,8 +302,12 @@ function ConfigApp() {
         });
         setConfig(newConfig);
       }
-      // Title generation actions
-      else if (item.id === 'generate') {
+      // Title generation actions (provider-specific)
+      else if (item.id === 'claude-generate' || item.id === 'codex-generate') {
+        const providerId: ProviderId = item.id === 'claude-generate' ? 'claudeCode' : 'codex';
+        const providerName = providerId === 'claudeCode' ? 'Claude Code' : 'Codex';
+
+        setGeneratingProvider(providerId);
         setGenerationProgress({
           completed: 0,
           total: untitledCount,
@@ -285,38 +316,40 @@ function ConfigApp() {
         });
 
         const generatedIds: string[] = [];
-        const result = await enrichUntitledConversations({
+        const result = await enrichWithProvider(providerId, {
           onProgress: (progress) => setGenerationProgress(progress),
           onTitleGenerated: (convId) => generatedIds.push(convId),
         });
 
         setGenerationProgress(null);
-        setRecentlyGeneratedIds(generatedIds);
+        setGeneratingProvider(null);
+        setRecentlyGeneratedIds({ provider: providerId, ids: generatedIds });
 
         const newCount = await conversationRepo.countUntitled();
         setUntitledCount(newCount);
 
-        const providerMsg = result.provider ? ` via ${result.provider}` : '';
         setToast({
-          message: `Generated ${result.enriched} title${result.enriched === 1 ? '' : 's'}${providerMsg}${result.failed > 0 ? `, ${result.failed} failed` : ''}`,
+          message: `Generated ${result.enriched} title${result.enriched === 1 ? '' : 's'} via ${providerName}${result.failed > 0 ? `, ${result.failed} failed` : ''}`,
           type: result.failed > 0 ? 'error' : 'success',
         });
-      } else if (item.id === 'reset') {
+      } else if (item.id === 'claude-reset' || item.id === 'codex-reset') {
         // Reset recently generated titles back to "Untitled"
-        for (const convId of recentlyGeneratedIds) {
-          await conversationRepo.updateTitle(convId, 'Untitled');
+        if (recentlyGeneratedIds) {
+          for (const convId of recentlyGeneratedIds.ids) {
+            await conversationRepo.updateTitle(convId, 'Untitled');
+          }
+
+          const resetCount = recentlyGeneratedIds.ids.length;
+          setRecentlyGeneratedIds(null);
+
+          const newCount = await conversationRepo.countUntitled();
+          setUntitledCount(newCount);
+
+          setToast({
+            message: `Reset ${resetCount} title${resetCount === 1 ? '' : 's'} to "Untitled"`,
+            type: 'info',
+          });
         }
-
-        const resetCount = recentlyGeneratedIds.length;
-        setRecentlyGeneratedIds([]);
-
-        const newCount = await conversationRepo.countUntitled();
-        setUntitledCount(newCount);
-
-        setToast({
-          message: `Reset ${resetCount} title${resetCount === 1 ? '' : 's'} to "Untitled"`,
-          type: 'info',
-        });
       }
     } catch (err) {
       setGenerationProgress(null);
@@ -428,6 +461,8 @@ function ConfigApp() {
           const actualIdx = selectableItems.indexOf(item);
           const isSelected = actualIdx === selectedIndex;
           const isDisconnect = item.id === 'claude-disconnect';
+          const isGenerate = item.id === 'claude-generate';
+          const isReset = item.id === 'claude-reset';
 
           return (
             <Box key={item.id}>
@@ -436,10 +471,44 @@ function ConfigApp() {
               {item.type === 'toggle' && (
                 <Text color={item.value ? 'green' : 'gray'}>[{item.value ? '✓' : ' '}] </Text>
               )}
-              <Text color={isSelected ? 'cyan' : isDisconnect ? 'red' : 'white'}>{item.label}</Text>
+              <Text color={isSelected ? 'cyan' : isDisconnect ? 'red' : isGenerate ? 'blue' : isReset ? 'yellow' : 'white'}>
+                {item.label}
+              </Text>
             </Box>
           );
         })}
+
+        {/* Progress display when generating via Claude Code */}
+        {generatingProvider === 'claudeCode' && generationProgress && (
+          <>
+            <Box>
+              <Text color="gray">│  </Text>
+              <ProgressBar
+                current={generationProgress.completed}
+                total={generationProgress.total}
+                width={Math.min(40, cardWidth - 4)}
+              />
+            </Box>
+            {generationProgress.recentTitles
+              .slice(-6)
+              .filter((item, idx, arr) => arr.findIndex(x => x.title === item.title) === idx)
+              .slice(-3)
+              .map((item) => (
+              <Box key={item.id}>
+                <Text color="gray">│  </Text>
+                <Text color="green">✓ </Text>
+                <Text>{item.title.length > 50 ? item.title.slice(0, 47) + '...' : item.title}</Text>
+              </Box>
+            ))}
+            {generationProgress.inFlight > 0 && (
+              <Box>
+                <Text color="gray">│  </Text>
+                <Text color="cyan">{spinner[frame]} </Text>
+                <Text dimColor>{generationProgress.inFlight} generating...</Text>
+              </Box>
+            )}
+          </>
+        )}
 
         {/* Card bottom */}
         <Box>
@@ -480,6 +549,8 @@ function ConfigApp() {
           const isSelected = actualIdx === selectedIndex;
           const isDisconnect = item.id === 'codex-disconnect';
           const isConnect = item.id === 'codex-connect';
+          const isGenerate = item.id === 'codex-generate';
+          const isReset = item.id === 'codex-reset';
 
           return (
             <Box key={item.id}>
@@ -488,107 +559,50 @@ function ConfigApp() {
               {item.type === 'toggle' && (
                 <Text color={item.value ? 'green' : 'gray'}>[{item.value ? '✓' : ' '}] </Text>
               )}
-              <Text color={isSelected ? 'cyan' : isDisconnect ? 'red' : isConnect ? 'green' : 'white'}>
+              <Text color={isSelected ? 'cyan' : isDisconnect ? 'red' : isConnect ? 'green' : isGenerate ? 'blue' : isReset ? 'yellow' : 'white'}>
                 {item.label}
               </Text>
             </Box>
           );
         })}
 
+        {/* Progress display when generating via Codex */}
+        {generatingProvider === 'codex' && generationProgress && (
+          <>
+            <Box>
+              <Text color="gray">│  </Text>
+              <ProgressBar
+                current={generationProgress.completed}
+                total={generationProgress.total}
+                width={Math.min(40, cardWidth - 4)}
+              />
+            </Box>
+            {generationProgress.recentTitles
+              .slice(-6)
+              .filter((item, idx, arr) => arr.findIndex(x => x.title === item.title) === idx)
+              .slice(-3)
+              .map((item) => (
+              <Box key={item.id}>
+                <Text color="gray">│  </Text>
+                <Text color="green">✓ </Text>
+                <Text>{item.title.length > 50 ? item.title.slice(0, 47) + '...' : item.title}</Text>
+              </Box>
+            ))}
+            {generationProgress.inFlight > 0 && (
+              <Box>
+                <Text color="gray">│  </Text>
+                <Text color="cyan">{spinner[frame]} </Text>
+                <Text dimColor>{generationProgress.inFlight} generating...</Text>
+              </Box>
+            )}
+          </>
+        )}
+
         {/* Card bottom */}
         <Box>
           <Text color="gray">└{'─'.repeat(Math.max(0, cardWidth))}┘</Text>
         </Box>
       </Box>
-
-      {/* Titles Section - shown when any provider is connected */}
-      {anyProviderConnected && (
-        <Box flexDirection="column" paddingX={1}>
-          <Box>
-            <Text color="gray">╭─ </Text>
-            <Text dimColor>Titles from past conversations</Text>
-            <Text color="gray"> {'─'.repeat(Math.max(0, cardWidth - 31))}╮</Text>
-          </Box>
-
-          {/* Show which provider will be used */}
-          {(() => {
-            const activeProvider = getActiveEnrichmentProvider();
-            return activeProvider && (
-              <Box>
-                <Text color="gray">│  </Text>
-                <Text dimColor>Using: </Text>
-                <Text color="cyan">{activeProvider}</Text>
-              </Box>
-            );
-          })()}
-
-          {generationProgress ? (
-            <>
-              <Box>
-                <Text color="gray">│  </Text>
-                <ProgressBar
-                  current={generationProgress.completed}
-                  total={generationProgress.total}
-                  width={Math.min(40, cardWidth - 4)}
-                />
-              </Box>
-              {/* Deduplicate by title for display */}
-              {generationProgress.recentTitles
-                .slice(-6)
-                .filter((item, idx, arr) => arr.findIndex(x => x.title === item.title) === idx)
-                .slice(-3)
-                .map((item) => (
-                <Box key={item.id}>
-                  <Text color="gray">│  </Text>
-                  <Text color="green">✓ </Text>
-                  <Text>{item.title.length > 50 ? item.title.slice(0, 47) + '...' : item.title}</Text>
-                </Box>
-              ))}
-              {generationProgress.inFlight > 0 && (
-                <Box>
-                  <Text color="gray">│  </Text>
-                  <Text color="cyan">{spinner[frame]} </Text>
-                  <Text dimColor>{generationProgress.inFlight} generating...</Text>
-                </Box>
-              )}
-            </>
-          ) : (
-            <>
-              {untitledCount === 0 ? (
-                <Box>
-                  <Text color="gray">│  </Text>
-                  <Text color="green">✓ </Text>
-                  <Text dimColor>All conversations have titles</Text>
-                </Box>
-              ) : (
-                <Box>
-                  <Text color="gray">│  </Text>
-                  <Text dimColor>{untitledCount} untitled conversation{untitledCount === 1 ? '' : 's'} found</Text>
-                </Box>
-              )}
-              {selectableItems.filter(i => i.section === 'titles').map((item) => {
-                const actualIdx = selectableItems.indexOf(item);
-                const isSelected = actualIdx === selectedIndex;
-                const isReset = item.id === 'reset';
-
-                return (
-                  <Box key={item.id}>
-                    <Text color="gray">│  </Text>
-                    <Text color={isSelected ? 'cyan' : 'white'}>{isSelected ? '▸ ' : '  '}</Text>
-                    <Text color={isSelected ? 'cyan' : isReset ? 'yellow' : 'blue'}>
-                      [{isReset ? `Reset ${recentlyGeneratedIds.length}` : 'Generate Now'}]
-                    </Text>
-                  </Box>
-                );
-              })}
-            </>
-          )}
-
-          <Box>
-            <Text color="gray">╰{'─'.repeat(Math.max(0, cardWidth))}╯</Text>
-          </Box>
-        </Box>
-      )}
 
       {/* Spacer */}
       <Box flexGrow={1} />
