@@ -10,6 +10,7 @@ import { exportCommand } from './cli/commands/export';
 import { backupCommand } from './cli/commands/backup';
 import { importCommand } from './cli/commands/import';
 import { unifiedCommand } from './cli/commands/unified';
+import { configCommand } from './cli/commands/config';
 
 const program = new Command()
   .name('dex')
@@ -80,6 +81,11 @@ program
   .option('--dry-run', 'Preview what would be imported without writing')
   .option('--force', 'Overwrite existing conversations')
   .action(importCommand);
+
+program
+  .command('config')
+  .description('Open settings')
+  .action(configCommand);
 
 // Default action when no subcommand is provided
 program.action(async () => {

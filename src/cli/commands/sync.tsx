@@ -37,6 +37,8 @@ import {
   clearEmbeddingProgress,
 } from '../../embeddings/index';
 import { printRichSummary } from './stats';
+import { loadConfig } from '../../config/index.js';
+import { enrichUntitledConversations } from '../../features/enrichment/index.js';
 
 /**
  * Kill any running embedding processes to prevent LanceDB commit conflicts.
@@ -71,6 +73,7 @@ export interface SyncProgress {
     | 'extracting'
     | 'syncing'
     | 'indexing'
+    | 'enriching'
     | 'done'
     | 'error';
   currentSource?: string;
@@ -82,6 +85,7 @@ export interface SyncProgress {
   messagesIndexed: number;
   error?: string;
   embeddingStarted?: boolean;
+  enrichmentProgress?: { current: number; total: number };
 }
 
 /**
@@ -182,6 +186,11 @@ function SyncUI({ progress }: { progress: SyncProgress }) {
           {progress.phase === 'extracting' && `Extracting ${progress.currentSource} conversations...`}
           {progress.phase === 'syncing' && `Syncing ${progress.currentSource}...`}
           {progress.phase === 'indexing' && 'Building search index...'}
+          {progress.phase === 'enriching' && (
+            progress.enrichmentProgress
+              ? `Generating titles (${progress.enrichmentProgress.current}/${progress.enrichmentProgress.total})...`
+              : 'Generating titles...'
+          )}
         </Text>
       </Box>
 
@@ -461,6 +470,25 @@ export async function runSync(
 
       spawnBackgroundEmbedding();
       progress.embeddingStarted = true;
+    }
+
+    // ========== PHASE 7: Enrich untitled conversations (if enabled) ==========
+    const config = loadConfig();
+    if (config.providers.claudeCode.enabled && config.providers.claudeCode.autoEnrichSummaries) {
+      progress.phase = 'enriching';
+      progress.currentSource = undefined;
+      progress.currentProject = undefined;
+      onProgress({ ...progress });
+
+      try {
+        await enrichUntitledConversations((current, total) => {
+          progress.enrichmentProgress = { current, total };
+          onProgress({ ...progress });
+        });
+      } catch (err) {
+        // Log enrichment errors but don't fail sync
+        console.error('Enrichment failed:', err);
+      }
     }
 
     progress.phase = 'done';
