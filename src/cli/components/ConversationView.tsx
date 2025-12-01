@@ -12,6 +12,7 @@ import {
   getRoleLabel,
   formatTokenPair,
   getLineCountParts,
+  formatRelativeTime,
   type CombinedMessage,
 } from '../../utils/format';
 import type { Conversation, ConversationFile, MessageFile } from '../../schema/index';
@@ -85,8 +86,14 @@ export function ConversationView({
         <Text bold color="cyan">{conversation.title}</Text>
         <Text>
           <Text color="yellow">{sourceInfo}</Text>
-          {workspaceDisplay && <Text dimColor> · </Text>}
+          {workspaceDisplay && <Text color="gray"> · </Text>}
           <Text color="magenta">{workspaceDisplay}</Text>
+          {conversation.createdAt && (
+            <>
+              <Text color="gray"> · </Text>
+              <Text color="gray">{formatRelativeTime(conversation.createdAt)}</Text>
+            </>
+          )}
         </Text>
         <Text color="gray">
           {formatFilesDisplay(fileNames, files.length)}

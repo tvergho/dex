@@ -314,14 +314,14 @@ export function useNavigation({
         break;
       case 'conversation':
         if (hasSearchResults && expandedResult && expandedResult.matches.length > 0) {
+          // Going back to matches view - preserve indexMap for correct numbering
           setViewMode('matches');
+          setHighlightMessageIndex(undefined);
+          setSelectedMessageIndex(0);
         } else {
+          // Going back to list view - clear everything
           goToList();
         }
-        setCombinedMessages([]);
-        setMessageIndexMap(new Map());
-        setHighlightMessageIndex(undefined);
-        setSelectedMessageIndex(0);
         break;
       case 'matches':
         goToList();
