@@ -342,10 +342,14 @@ export async function runSync(
       const batch = locationsNeedingSync.slice(i, i + EXTRACTION_CONCURRENCY);
       const batchResults = await Promise.all(
         batch.map(async ({ adapter, location }) => {
-          progress.currentSource = adapter.name;
+          // Capture adapter name in closure to avoid race condition with parallel extractions
+          const adapterName = adapter.name;
+          progress.currentSource = adapterName;
           progress.extractionProgress = undefined; // Reset for new extraction
           onProgress({ ...progress });
           const rawConversations = await adapter.extract(location, (extractionProg) => {
+            // Use captured adapterName, not progress.currentSource (which may have changed)
+            progress.currentSource = adapterName;
             progress.extractionProgress = extractionProg;
             onProgress({ ...progress });
           });
