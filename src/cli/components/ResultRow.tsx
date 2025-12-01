@@ -85,18 +85,20 @@ export function ResultRow({
       </Box>
       {/* Row 2: Source + workspace path */}
       <Box marginLeft={indexWidth + (indexWidth > 0 ? 1 : 0)}>
-        <SourceBadge source={conversation.source} />
-        {displayPath && (
-          <Text color="magenta"> · {displayPath}</Text>
-        )}
+        <Text wrap="truncate-end">
+          <SourceBadge source={conversation.source} />
+          {displayPath && (
+            <Text color="magenta"> · {displayPath}</Text>
+          )}
+        </Text>
       </Box>
       {/* Row 3: Snippet or file matches */}
       <Box marginLeft={indexWidth + (indexWidth > 0 ? 1 : 0)}>
         {hasFileMatches ? (
-          <>
+          <Text wrap="truncate-end">
             <Text color="green">Files: </Text>
             <Text color="gray">{fileMatchDisplay}</Text>
-          </>
+          </Text>
         ) : (
           <HighlightedText text={snippetText} query={query} dimColor={false} />
         )}

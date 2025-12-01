@@ -27,7 +27,7 @@ export function HighlightedText({
   const parts = text.split(regex);
 
   return (
-    <Text dimColor={dimColor} wrap="wrap">
+    <Text dimColor={dimColor} wrap="truncate-end">
       {parts.map((part, i) => {
         const isMatch = terms.some((t) => part.toLowerCase() === t);
         if (isMatch) {
