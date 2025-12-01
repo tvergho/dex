@@ -82,7 +82,7 @@ export function MatchesView({
         <Text color="gray">{'─'.repeat(Math.max(0, width))}</Text>
       </Box>
 
-      {/* Matches - fixed height per match */}
+      {/* Matches - consistent spacing with explicit spacer */}
       <Box flexDirection="column" flexGrow={1} marginTop={1}>
         {visibleMatches.map((match, idx) => {
           const actualIdx = scrollOffset + idx;
@@ -100,33 +100,38 @@ export function MatchesView({
           // Use combined message index if available, otherwise use original
           const displayIndex = indexMap?.get(match.messageIndex) ?? match.messageIndex;
 
+          // Format index with consistent width (right-aligned)
+          const indexStr = `${displayIndex + 1}.`;
+          const indexWidth = 4; // "999." max
+
+          // Truncate snippet to fit
+          const contentWidth = width - indexWidth - 1;
+          const snippetContent = match.content.replace(/\n/g, ' ').trim();
+          const snippetText = snippetContent.length > contentWidth - 2
+            ? snippetContent.slice(0, contentWidth - 3) + '…'
+            : snippetContent;
+
           return (
             <Box
               key={match.messageId}
               flexDirection="column"
-              height={3}
             >
+              {/* Row 1: Index + Role + Files */}
               <Box>
-                <Text backgroundColor={isSelected ? 'cyan' : undefined} color={isSelected ? 'black' : undefined}>
-                  {isSelected ? ' ▸ ' : '   '}
+                <Text color={isSelected ? 'cyan' : 'gray'}>{indexStr.padStart(indexWidth)} </Text>
+                <Text color={roleColor} bold={isSelected} underline={isSelected}>
+                  {roleLabel}
                 </Text>
-                <Box width={14}>
-                  <Text color={roleColor} bold>
-                    {roleLabel}
-                  </Text>
-                  <Text color="gray"> #{displayIndex + 1}</Text>
-                </Box>
                 {filesDisplay && (
-                  <Text color="gray" wrap="truncate"> ({filesDisplay})</Text>
+                  <Text color="gray"> ({filesDisplay})</Text>
                 )}
               </Box>
-              <Box marginLeft={3}>
-                <HighlightedText
-                  text={match.content.replace(/\n/g, ' ').slice(0, width * 2)}
-                  query={query}
-                  dimColor={false}
-                />
+              {/* Row 2: Snippet with highlighting */}
+              <Box marginLeft={indexWidth + 1} width={contentWidth}>
+                <HighlightedText text={snippetText} query={query} />
               </Box>
+              {/* Spacer for consistent vertical spacing */}
+              <Box height={1} />
             </Box>
           );
         })}
