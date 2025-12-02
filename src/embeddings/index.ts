@@ -170,6 +170,18 @@ export async function stopQueryServer(): Promise<void> {
   }
 }
 
+/**
+ * Pre-warm the query server so searches are fast.
+ * Call this on app startup. Safe to call multiple times.
+ */
+export async function warmupQueryServer(): Promise<void> {
+  try {
+    await ensureQueryServer();
+  } catch {
+    // Silently fail - server will start on first search if needed
+  }
+}
+
 // Clear progress file
 export function clearEmbeddingProgress(): void {
   const path = getProgressPath();

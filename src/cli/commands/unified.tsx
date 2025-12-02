@@ -21,7 +21,7 @@ import { conversationRepo, search, searchByFilePath, getFileMatchesForConversati
 import { getLanceDBPath } from '../../utils/config';
 import { spawnDexCommand, runtimeCmd, spawnBackgroundCommand } from '../../utils/spawn';
 import { quickNeedsSync } from '../../utils/sync-cache';
-import { getEmbeddingProgress, isEmbeddingInProgress } from '../../embeddings/index';
+import { getEmbeddingProgress, isEmbeddingInProgress, warmupQueryServer, stopQueryServer } from '../../embeddings/index';
 
 // Get count via child process to avoid blocking UI
 function getCountInBackground(): Promise<number> {
@@ -817,6 +817,8 @@ function UnifiedApp() {
         setConversationCount(count);
         setFirstLoadComplete(true);
         setSyncStatus({ phase: 'done', newConversations: count });
+        // Pre-warm llama-server for fast searches
+        warmupQueryServer();
       } else {
         // Not first load - show UI immediately and sync in background
         setIsFirstLoad(false);
@@ -834,6 +836,8 @@ function UnifiedApp() {
           const count = await conversationRepo.count();
           setConversationCount(count);
           startBackgroundSync();
+          // Pre-warm llama-server for fast searches
+          warmupQueryServer();
         })();
       }
     });
@@ -1049,6 +1053,8 @@ function UnifiedApp() {
 
     // Quit from home/list (but not from deeper views)
     if (input === 'q' && (unifiedViewMode === 'home' || unifiedViewMode === 'list')) {
+      // Stop llama-server before exit
+      stopQueryServer();
       exit();
       // Force exit after short delay to avoid hanging on open connections
       setTimeout(() => process.exit(0), 100);
@@ -1396,7 +1402,18 @@ export async function unifiedCommand(): Promise<void> {
     return;
   }
 
+  // Cleanup llama-server on exit signals
+  const cleanup = () => {
+    stopQueryServer();
+    process.exit(0);
+  };
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
+
   const app = withFullScreen(<UnifiedApp />);
   await app.start();
   await app.waitUntilExit();
+
+  // Cleanup after normal exit
+  await stopQueryServer();
 }

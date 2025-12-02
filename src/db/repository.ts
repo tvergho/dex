@@ -640,7 +640,7 @@ export const messageRepo = {
       const results = await (table.search(queryVector) as any)
         .fullTextSearch(query)
         .rerank(reranker)
-        .select(['id', 'conversation_id', 'role', 'content', 'message_index'])
+        .select(['id', 'conversation_id', 'role', 'content', 'message_index', '_score', '_distance', '_relevance_score'])
         .limit(limit)
         .toArray() as Record<string, unknown>[];
 
