@@ -605,29 +605,31 @@ export const messageRepo = {
   },
 
   async findByConversation(conversationId: string): Promise<Message[]> {
-    const table = await getMessagesTable();
-    // With snake_case columns, we can use direct filtering
-    const results = await table
-      .query()
-      .where(`conversation_id = '${conversationId}'`)
-      .toArray();
+    return withRetry(async () => {
+      const table = await getMessagesTable();
+      // With snake_case columns, we can use direct filtering
+      const results = await table
+        .query()
+        .where(`conversation_id = '${conversationId}'`)
+        .toArray();
 
-    return results
-      .map((row) => ({
-        id: row.id as string,
-        conversationId: row.conversation_id as string,
-        role: row.role as Message['role'],
-        content: row.content as string,
-        timestamp: (row.timestamp as string) || undefined,
-        messageIndex: (row.message_index as number) || 0,
-        inputTokens: (row.input_tokens as number) || undefined,
-        outputTokens: (row.output_tokens as number) || undefined,
-        cacheCreationTokens: (row.cache_creation_tokens as number) || undefined,
-        cacheReadTokens: (row.cache_read_tokens as number) || undefined,
-        totalLinesAdded: (row.total_lines_added as number) || undefined,
-        totalLinesRemoved: (row.total_lines_removed as number) || undefined,
-      }))
-      .sort((a, b) => a.messageIndex - b.messageIndex);
+      return results
+        .map((row) => ({
+          id: row.id as string,
+          conversationId: row.conversation_id as string,
+          role: row.role as Message['role'],
+          content: row.content as string,
+          timestamp: (row.timestamp as string) || undefined,
+          messageIndex: (row.message_index as number) || 0,
+          inputTokens: (row.input_tokens as number) || undefined,
+          outputTokens: (row.output_tokens as number) || undefined,
+          cacheCreationTokens: (row.cache_creation_tokens as number) || undefined,
+          cacheReadTokens: (row.cache_read_tokens as number) || undefined,
+          totalLinesAdded: (row.total_lines_added as number) || undefined,
+          totalLinesRemoved: (row.total_lines_removed as number) || undefined,
+        }))
+        .sort((a, b) => a.messageIndex - b.messageIndex);
+    });
   },
 
   async deleteByConversation(conversationId: string): Promise<void> {
@@ -783,39 +785,43 @@ export const toolCallRepo = {
   },
 
   async findByFile(filePath: string): Promise<ToolCall[]> {
-    const table = await getToolCallsTable();
-    const results = await table
-      .query()
-      .where(`file_path = '${filePath}'`)
-      .toArray();
+    return withRetry(async () => {
+      const table = await getToolCallsTable();
+      const results = await table
+        .query()
+        .where(`file_path = '${filePath}'`)
+        .toArray();
 
-    return results.map((row) => ({
-      id: row.id as string,
-      messageId: row.message_id as string,
-      conversationId: row.conversation_id as string,
-      type: row.type as string,
-      input: row.input as string,
-      output: (row.output as string) || undefined,
-      filePath: (row.file_path as string) || undefined,
-    }));
+      return results.map((row) => ({
+        id: row.id as string,
+        messageId: row.message_id as string,
+        conversationId: row.conversation_id as string,
+        type: row.type as string,
+        input: row.input as string,
+        output: (row.output as string) || undefined,
+        filePath: (row.file_path as string) || undefined,
+      }));
+    });
   },
 
   async findByConversation(conversationId: string): Promise<ToolCall[]> {
-    const table = await getToolCallsTable();
-    const results = await table
-      .query()
-      .where(`conversation_id = '${conversationId}'`)
-      .toArray();
+    return withRetry(async () => {
+      const table = await getToolCallsTable();
+      const results = await table
+        .query()
+        .where(`conversation_id = '${conversationId}'`)
+        .toArray();
 
-    return results.map((row) => ({
-      id: row.id as string,
-      messageId: row.message_id as string,
-      conversationId: row.conversation_id as string,
-      type: row.type as string,
-      input: row.input as string,
-      output: (row.output as string) || undefined,
-      filePath: (row.file_path as string) || undefined,
-    }));
+      return results.map((row) => ({
+        id: row.id as string,
+        messageId: row.message_id as string,
+        conversationId: row.conversation_id as string,
+        type: row.type as string,
+        input: row.input as string,
+        output: (row.output as string) || undefined,
+        filePath: (row.file_path as string) || undefined,
+      }));
+    });
   },
 
   async deleteByConversation(conversationId: string): Promise<void> {
@@ -888,18 +894,20 @@ export const filesRepo = {
   },
 
   async findByConversation(conversationId: string): Promise<ConversationFile[]> {
-    const table = await getFilesTable();
-    const results = await table
-      .query()
-      .where(`conversation_id = '${conversationId}'`)
-      .toArray();
+    return withRetry(async () => {
+      const table = await getFilesTable();
+      const results = await table
+        .query()
+        .where(`conversation_id = '${conversationId}'`)
+        .toArray();
 
-    return results.map((row) => ({
-      id: row.id as string,
-      conversationId: row.conversation_id as string,
-      filePath: row.file_path as string,
-      role: row.role as ConversationFile['role'],
-    }));
+      return results.map((row) => ({
+        id: row.id as string,
+        conversationId: row.conversation_id as string,
+        filePath: row.file_path as string,
+        role: row.role as ConversationFile['role'],
+      }));
+    });
   },
 
   async deleteByConversation(conversationId: string): Promise<void> {
@@ -929,35 +937,39 @@ export const messageFilesRepo = {
   },
 
   async findByMessage(messageId: string): Promise<MessageFile[]> {
-    const table = await getMessageFilesTable();
-    const results = await table
-      .query()
-      .where(`message_id = '${messageId}'`)
-      .toArray();
+    return withRetry(async () => {
+      const table = await getMessageFilesTable();
+      const results = await table
+        .query()
+        .where(`message_id = '${messageId}'`)
+        .toArray();
 
-    return results.map((row) => ({
-      id: row.id as string,
-      messageId: row.message_id as string,
-      conversationId: row.conversation_id as string,
-      filePath: row.file_path as string,
-      role: row.role as MessageFile['role'],
-    }));
+      return results.map((row) => ({
+        id: row.id as string,
+        messageId: row.message_id as string,
+        conversationId: row.conversation_id as string,
+        filePath: row.file_path as string,
+        role: row.role as MessageFile['role'],
+      }));
+    });
   },
 
   async findByConversation(conversationId: string): Promise<MessageFile[]> {
-    const table = await getMessageFilesTable();
-    const results = await table
-      .query()
-      .where(`conversation_id = '${conversationId}'`)
-      .toArray();
+    return withRetry(async () => {
+      const table = await getMessageFilesTable();
+      const results = await table
+        .query()
+        .where(`conversation_id = '${conversationId}'`)
+        .toArray();
 
-    return results.map((row) => ({
-      id: row.id as string,
-      messageId: row.message_id as string,
-      conversationId: row.conversation_id as string,
-      filePath: row.file_path as string,
-      role: row.role as MessageFile['role'],
-    }));
+      return results.map((row) => ({
+        id: row.id as string,
+        messageId: row.message_id as string,
+        conversationId: row.conversation_id as string,
+        filePath: row.file_path as string,
+        role: row.role as MessageFile['role'],
+      }));
+    });
   },
 
   async deleteByConversation(conversationId: string): Promise<void> {
@@ -1024,45 +1036,49 @@ export const fileEditsRepo = {
   },
 
   async findByMessage(messageId: string): Promise<FileEdit[]> {
-    const table = await getFileEditsTable();
-    const results = await table
-      .query()
-      .where(`message_id = '${messageId}'`)
-      .toArray();
+    return withRetry(async () => {
+      const table = await getFileEditsTable();
+      const results = await table
+        .query()
+        .where(`message_id = '${messageId}'`)
+        .toArray();
 
-    return results.map((row) => ({
-      id: row.id as string,
-      messageId: row.message_id as string,
-      conversationId: row.conversation_id as string,
-      filePath: row.file_path as string,
-      editType: row.edit_type as FileEdit['editType'],
-      linesAdded: row.lines_added as number,
-      linesRemoved: row.lines_removed as number,
-      startLine: (row.start_line as number) || undefined,
-      endLine: (row.end_line as number) || undefined,
-      newContent: (row.new_content as string) || undefined,
-    }));
+      return results.map((row) => ({
+        id: row.id as string,
+        messageId: row.message_id as string,
+        conversationId: row.conversation_id as string,
+        filePath: row.file_path as string,
+        editType: row.edit_type as FileEdit['editType'],
+        linesAdded: row.lines_added as number,
+        linesRemoved: row.lines_removed as number,
+        startLine: (row.start_line as number) || undefined,
+        endLine: (row.end_line as number) || undefined,
+        newContent: (row.new_content as string) || undefined,
+      }));
+    });
   },
 
   async findByConversation(conversationId: string): Promise<FileEdit[]> {
-    const table = await getFileEditsTable();
-    const results = await table
-      .query()
-      .where(`conversation_id = '${conversationId}'`)
-      .toArray();
+    return withRetry(async () => {
+      const table = await getFileEditsTable();
+      const results = await table
+        .query()
+        .where(`conversation_id = '${conversationId}'`)
+        .toArray();
 
-    return results.map((row) => ({
-      id: row.id as string,
-      messageId: row.message_id as string,
-      conversationId: row.conversation_id as string,
-      filePath: row.file_path as string,
-      editType: row.edit_type as FileEdit['editType'],
-      linesAdded: row.lines_added as number,
-      linesRemoved: row.lines_removed as number,
-      startLine: (row.start_line as number) || undefined,
-      endLine: (row.end_line as number) || undefined,
-      newContent: (row.new_content as string) || undefined,
-    }));
+      return results.map((row) => ({
+        id: row.id as string,
+        messageId: row.message_id as string,
+        conversationId: row.conversation_id as string,
+        filePath: row.file_path as string,
+        editType: row.edit_type as FileEdit['editType'],
+        linesAdded: row.lines_added as number,
+        linesRemoved: row.lines_removed as number,
+        startLine: (row.start_line as number) || undefined,
+        endLine: (row.end_line as number) || undefined,
+        newContent: (row.new_content as string) || undefined,
+      }));
+    });
   },
 
   async deleteByConversation(conversationId: string): Promise<void> {
