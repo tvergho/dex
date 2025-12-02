@@ -45,7 +45,7 @@
     "test:coverage": "bun test --coverage",
     "test:cursor": "node --import tsx --test tests/unit/adapters/cursor.node-test.ts",
     "test:all": "bun test && npm run test:cursor",
-    "reset": "rm -rf ~/.dex/lancedb ~/.dex/embed-config.json ~/.dex/embedding-progress.json 2>/dev/null; echo '✓ Database and progress reset'"
+    "reset": "rm -rf ~/.dex 2>/dev/null; echo '✓ Data directory reset'"
   },
   "dependencies": {
     "@lancedb/lancedb": "0.22.3",
