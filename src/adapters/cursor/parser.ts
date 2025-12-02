@@ -127,69 +127,90 @@ function mapBubbleType(type: number | undefined): RawBubble['type'] {
 }
 
 // Extract workspace path from file paths (handles outliers like stdlib paths)
+// Optimized O(f) algorithm - single pass with early termination
 function extractWorkspacePath(filePaths: string[]): string | undefined {
   if (filePaths.length === 0) return undefined;
 
-  const absolutePaths = filePaths.filter((p) => p.startsWith('/'));
-  if (absolutePaths.length === 0) return undefined;
+  const projectIndicators = new Set(['src', 'lib', 'app', 'packages', 'node_modules', 'dist', 'test', 'tests', 'scripts']);
 
-  const projectIndicators = ['src', 'lib', 'app', 'packages', 'node_modules', 'dist', 'test', 'tests', 'scripts'];
+  // Filter to absolute paths and split them in one pass
+  const splitPaths: string[][] = [];
+  for (const p of filePaths) {
+    if (p.startsWith('/')) {
+      const parts = p.split('/');
+      // Remove empty first element from leading slash
+      if (parts.length > 1) {
+        parts.shift();
+        splitPaths.push(parts);
+      }
+    }
+  }
 
-  const deriveFromPaths = (paths: string[]): string | undefined => {
-    const splitPaths = paths
-      .map((p) => p.split('/').filter(Boolean))
-      .filter((parts) => parts.length > 0);
-    if (splitPaths.length === 0) return undefined;
+  if (splitPaths.length === 0) return undefined;
 
-    const firstPath = splitPaths[0];
-    if (!firstPath || firstPath.length === 0) return undefined;
+  const firstPath = splitPaths[0]!;
+  if (firstPath.length === 0) return undefined;
 
-    const commonParts: string[] = [];
-    for (let i = 0; i < firstPath.length; i++) {
-      const part = firstPath[i];
-      if (part && splitPaths.every((p) => p[i] === part)) {
-        commonParts.push(part);
-      } else {
+  // Single pass: find common prefix parts
+  const commonParts: string[] = [];
+  for (let i = 0; i < firstPath.length; i++) {
+    const part = firstPath[i]!;
+    let allMatch = true;
+    for (let j = 1; j < splitPaths.length; j++) {
+      if (splitPaths[j]![i] !== part) {
+        allMatch = false;
         break;
       }
     }
-
-    if (commonParts.length === 0) return undefined;
-
-    const projectIdx = commonParts.findIndex((p) => projectIndicators.includes(p));
-    if (projectIdx > 0) {
-      return '/' + commonParts.slice(0, projectIdx).join('/');
+    if (allMatch) {
+      commonParts.push(part);
+    } else {
+      break;
     }
-
-    if (commonParts.length > 1) {
-      const lastPart = commonParts[commonParts.length - 1];
-      if (lastPart && lastPart.includes('.')) {
-        return '/' + commonParts.slice(0, -1).join('/');
-      }
-      return '/' + commonParts.join('/');
-    }
-
-    return undefined;
-  };
-
-  // First try to derive a workspace that fits all absolute paths
-  const fromAll = deriveFromPaths(absolutePaths);
-  if (fromAll) return fromAll;
-
-  // Fallback: score workspaces per path and take the most common/longest
-  const candidateCounts = new Map<string, number>();
-  for (const absPath of absolutePaths) {
-    const candidate = deriveFromPaths([absPath]);
-    if (!candidate) continue;
-    candidateCounts.set(candidate, (candidateCounts.get(candidate) ?? 0) + 1);
   }
 
-  if (candidateCounts.size === 0) return undefined;
+  if (commonParts.length === 0) {
+    // No common prefix - use first path up to project indicator or parent of file
+    let cutoff = firstPath.length;
+    for (let i = 0; i < firstPath.length; i++) {
+      if (projectIndicators.has(firstPath[i]!)) {
+        cutoff = i;
+        break;
+      }
+    }
+    // If no indicator found, exclude the filename
+    if (cutoff === firstPath.length && firstPath.length > 1) {
+      const lastPart = firstPath[firstPath.length - 1];
+      if (lastPart && lastPart.includes('.')) {
+        cutoff = firstPath.length - 1;
+      }
+    }
+    if (cutoff > 0) {
+      return '/' + firstPath.slice(0, cutoff).join('/');
+    }
+    return undefined;
+  }
 
-  const [bestWorkspace] = Array.from(candidateCounts.entries())
-    .sort((a, b) => (b[1] - a[1]) || (b[0].length - a[0].length))[0]!;
+  // Trim common prefix at project indicator
+  for (let i = 0; i < commonParts.length; i++) {
+    if (projectIndicators.has(commonParts[i]!)) {
+      if (i > 0) {
+        return '/' + commonParts.slice(0, i).join('/');
+      }
+      return undefined;
+    }
+  }
 
-  return bestWorkspace;
+  // No indicator found - check if last common part is a file
+  if (commonParts.length > 1) {
+    const lastPart = commonParts[commonParts.length - 1];
+    if (lastPart && lastPart.includes('.')) {
+      return '/' + commonParts.slice(0, -1).join('/');
+    }
+    return '/' + commonParts.join('/');
+  }
+
+  return undefined;
 }
 
 // Extract project name from workspace path
@@ -417,6 +438,38 @@ export interface ExtractionProgress {
   total: number;
 }
 
+// Pre-load all bubbles by composerId for v9+ format
+// This avoids N+1 queries when processing conversations
+function loadAllBubbles(db: BetterSqliteDatabase): Map<string, Map<string, BubbleData>> {
+  const bubblesByComposer = new Map<string, Map<string, BubbleData>>();
+
+  const stmt = db.prepare("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'");
+  for (const row of stmt.iterate() as IterableIterator<{ key: string; value: Buffer | string }>) {
+    // Key format: bubbleId:{composerId}:{bubbleId}
+    const parts = row.key.split(':');
+    if (parts.length < 3) continue;
+    const composerId = parts[1]!;
+    const bubbleId = parts.slice(2).join(':'); // Handle bubbleIds with colons
+
+    try {
+      const valueStr = Buffer.isBuffer(row.value) ? row.value.toString('utf-8') : row.value;
+      const bubbleData = JSON.parse(valueStr) as BubbleData;
+      if (!bubbleData) continue;
+
+      let composerMap = bubblesByComposer.get(composerId);
+      if (!composerMap) {
+        composerMap = new Map<string, BubbleData>();
+        bubblesByComposer.set(composerId, composerMap);
+      }
+      composerMap.set(bubbleId, bubbleData);
+    } catch {
+      // Skip malformed bubble data
+    }
+  }
+
+  return bubblesByComposer;
+}
+
 export async function extractConversations(
   dbPath: string,
   onProgress?: (progress: ExtractionProgress) => void
@@ -429,11 +482,9 @@ export async function extractConversations(
     // (diffs are small - only ~933 conversations have them)
     const diffsByComposer = loadAllCodeBlockDiffs(db);
 
-    // Note: We don't pre-load bubbles because they're too large (125k+ entries, 4GB+ memory)
-    // Instead we do one batch query per conversation that needs v9+ format
-
-    // Pre-prepare the bubble query statement for reuse (avoid creating new statement per conversation)
-    const bubbleQueryStmt = db.prepare('SELECT key, value FROM cursorDiskKV WHERE key LIKE ?');
+    // Pre-load all bubbles for v9+ format in a single query
+    // This eliminates the per-conversation query bottleneck
+    const bubblesByComposer = loadAllBubbles(db);
 
     // Get total count for progress reporting
     const totalCount = (db.prepare("SELECT COUNT(*) as count FROM cursorDiskKV WHERE key LIKE 'composerData:%'").get() as { count: number }).count;
@@ -516,34 +567,12 @@ export async function extractConversations(
       // Try to get bubbles from separate bubbleId entries (newest format - v9+)
       // In this format, conversationMap is empty but bubbles are stored as separate entries
       if (bubbles.length === 0 && data.fullConversationHeadersOnly && data.fullConversationHeadersOnly.length > 0) {
-        // Batch load all bubbles for this composer in one query instead of N+1 queries
-        // Reuse prepared statement for performance
-        const bubblePrefix = `bubbleId:${composerId}:`;
-        const bubbleRows = bubbleQueryStmt.all(`${bubblePrefix}%`) as Array<{ key: string; value: Buffer | string }>;
+        // Use pre-loaded bubble map (O(1) lookup instead of per-conversation query)
+        const bubbleMap = bubblesByComposer.get(composerId);
 
-        // Build a map of bubbleId -> bubbleData for fast lookup
-        const bubbleMap = new Map<string, BubbleData>();
-        for (const bubbleRow of bubbleRows) {
-          const bubbleId = bubbleRow.key.replace(bubblePrefix, '');
-          try {
-            let bubbleStr: string;
-            if (Buffer.isBuffer(bubbleRow.value)) {
-              bubbleStr = bubbleRow.value.toString('utf-8');
-            } else {
-              bubbleStr = bubbleRow.value;
-            }
-            const bubbleData = JSON.parse(bubbleStr) as BubbleData;
-            if (bubbleData) {
-              bubbleMap.set(bubbleId, bubbleData);
-            }
-          } catch {
-            // Skip malformed bubble data
-          }
-        }
-
-        // Iterate through headers and look up from the map
+        // Iterate through headers and look up from the pre-loaded map
         for (const header of data.fullConversationHeadersOnly) {
-          if (header.bubbleId) {
+          if (header.bubbleId && bubbleMap) {
             const bubbleData = bubbleMap.get(header.bubbleId);
             if (bubbleData && bubbleData.text) {
               const bubbleFiles = extractBubbleFiles(bubbleData);
@@ -652,20 +681,20 @@ export async function extractConversations(
         }
       }
 
-      // Append file edit content to assistant bubbles
+      // Append file edit content to assistant bubbles (using array + join for efficiency)
       for (const bubble of bubbles) {
         if (bubble.type === 'assistant' && bubble.fileEdits.length > 0) {
+          const editParts: string[] = [bubble.text];
           for (const edit of bubble.fileEdits) {
             if (edit.newContent) {
               const fileName = edit.filePath.split('/').pop() || edit.filePath;
-              bubble.text += '\n\n---\n';
-              bubble.text += `**Edit** \`${fileName}\` (+${edit.linesAdded}/-${edit.linesRemoved})\n`;
-              bubble.text += '```\n';
-              bubble.text += edit.newContent;
-              bubble.text += '\n```\n---';
+              editParts.push(`\n\n---\n**Edit** \`${fileName}\` (+${edit.linesAdded}/-${edit.linesRemoved})\n\`\`\`\n${edit.newContent}\n\`\`\`\n---`);
               // Clear newContent after appending to avoid duplicate display
               edit.newContent = undefined;
             }
+          }
+          if (editParts.length > 1) {
+            bubble.text = editParts.join('');
           }
         }
       }

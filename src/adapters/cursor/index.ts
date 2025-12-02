@@ -120,7 +120,20 @@ export class CursorAdapter implements SourceAdapter {
       });
     }
 
+    // Build index of visible assistant bubbles: position -> bubbleId
+    // This allows O(1) lookup for tool-only bubbles instead of O(n) backwards search
+    let lastVisibleAssistantId: string | undefined;
+    const positionToAssistantId = new Map<number, string | undefined>();
+    for (let i = 0; i < raw.bubbles.length; i++) {
+      const bubble = raw.bubbles[i];
+      if (bubble && bubble.type === 'assistant' && mainBubbleIds.has(bubble.bubbleId)) {
+        lastVisibleAssistantId = bubble.bubbleId;
+      }
+      positionToAssistantId.set(i, lastVisibleAssistantId);
+    }
+
     // For each tool-only bubble, find the nearest visible assistant bubble and add its stats
+    // Now O(n) total instead of O(n²) worst case
     for (let i = 0; i < raw.bubbles.length; i++) {
       const bubble = raw.bubbles[i];
       if (!bubble) continue;
@@ -128,26 +141,22 @@ export class CursorAdapter implements SourceAdapter {
       // Skip if this is a main bubble (already has its own stats)
       if (mainBubbleIds.has(bubble.bubbleId)) continue;
 
-      // This is a tool-only bubble - find nearest visible assistant bubble
+      // This is a tool-only bubble - get nearest visible assistant from index
       if (bubble.type === 'assistant') {
-        // Look backwards for the nearest visible assistant bubble
-        for (let j = i - 1; j >= 0; j--) {
-          const prev = raw.bubbles[j];
-          if (prev && prev.type === 'assistant' && mainBubbleIds.has(prev.bubbleId)) {
-            const stats = aggregatedStats.get(prev.bubbleId);
-            if (stats) {
-              // Sum line counts and output tokens
-              stats.added += bubble.totalLinesAdded ?? 0;
-              stats.removed += bubble.totalLinesRemoved ?? 0;
-              stats.outputTokens += bubble.outputTokens ?? 0;
+        const nearestAssistantId = positionToAssistantId.get(i - 1);
+        if (nearestAssistantId) {
+          const stats = aggregatedStats.get(nearestAssistantId);
+          if (stats) {
+            // Sum line counts and output tokens
+            stats.added += bubble.totalLinesAdded ?? 0;
+            stats.removed += bubble.totalLinesRemoved ?? 0;
+            stats.outputTokens += bubble.outputTokens ?? 0;
 
-              // For input, use peak (each API call has full context)
-              const inputTokens = bubble.inputTokens ?? 0;
-              if (inputTokens > stats.peakInputTokens) {
-                stats.peakInputTokens = inputTokens;
-              }
+            // For input, use peak (each API call has full context)
+            const inputTokens = bubble.inputTokens ?? 0;
+            if (inputTokens > stats.peakInputTokens) {
+              stats.peakInputTokens = inputTokens;
             }
-            break;
           }
         }
       }
