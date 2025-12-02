@@ -173,7 +173,7 @@ function extractTextContent(
 
   // For assistant messages, interleave tool outputs at their positions
   const parts: string[] = [];
-  
+
   for (const c of content) {
     if (c.type === 'text' && c.text) {
       parts.push(c.text);
@@ -181,15 +181,15 @@ function extractTextContent(
       const result = toolResults.get(c.id);
       if (result) {
         // Build output string
-        const output = result.stdout || 
-                       result.file?.content || 
+        const output = result.stdout ||
+                       result.file?.content ||
                        result.newString ||
                        result.content;
-        
+
         if (output) {
           const filePath = result.filePath || result.file?.filePath;
           const fileName = filePath ? filePath.split('/').pop() : '';
-          
+
           // Format as inline tool output block
           parts.push('');
           parts.push(`---`);

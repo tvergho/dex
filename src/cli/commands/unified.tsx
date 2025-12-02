@@ -15,41 +15,17 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
-import { spawn } from 'child_process';
 import { connect, getMessagesTable } from '../../db/index';
 import { conversationRepo, search, searchByFilePath, getFileMatchesForConversations } from '../../db/repository';
-import { getLanceDBPath } from '../../utils/config';
-import { spawnDexCommand, runtimeCmd, spawnBackgroundCommand } from '../../utils/spawn';
+import { spawnDexCommand, spawnBackgroundCommand } from '../../utils/spawn';
 import { quickNeedsSync } from '../../utils/sync-cache';
 import { getEmbeddingProgress, isEmbeddingInProgress, warmupQueryServer, stopQueryServer } from '../../embeddings/index';
 
-// Get count via child process to avoid blocking UI
+// Get conversation count via child process to avoid blocking UI
 function getCountInBackground(): Promise<number> {
   return new Promise((resolve) => {
-    const dbPath = getLanceDBPath();
-    // Use dynamic import() to work with both bun -e and node -e
-    const script = `
-(async () => {
-  const lancedb = await import('@lancedb/lancedb');
-  try {
-    const db = await lancedb.connect('${dbPath}');
-    const tables = await db.tableNames();
-    if (tables.includes('conversations')) {
-      const table = await db.openTable('conversations');
-      const count = await table.countRows();
-      console.log(count);
-    } else {
-      console.log(0);
-    }
-  } catch (e) {
-    console.log(0);
-  }
-  process.exit(0);
-})();
-`;
-
     let resolved = false;
-    const child = spawn(runtimeCmd, ['-e', script], {
+    const child = spawnDexCommand('count', ['--conversations'], {
       stdio: ['ignore', 'pipe', 'ignore'],
     });
 
@@ -64,7 +40,10 @@ function getCountInBackground(): Promise<number> {
     child.on('close', () => {
       if (resolved) return;
       resolved = true;
-      const count = parseInt(output.trim(), 10);
+      // Parse last line (count command may have debug logs before the number)
+      const lines = output.trim().split('\n');
+      const lastLine = lines[lines.length - 1] || '0';
+      const count = parseInt(lastLine.trim(), 10);
       resolve(isNaN(count) ? 0 : count);
     });
 
@@ -87,17 +66,23 @@ function getCountInBackground(): Promise<number> {
 // Run sync in child process to avoid blocking UI
 // Returns: { newCount: number } on success, null on error
 function runSyncInBackground(
-  onComplete: (result: { newCount: number; diff: number } | null) => void
+  onComplete: (result: { newCount: number; diff: number } | null, error?: string) => void
 ): void {
   // Get initial count first, then spawn sync
   getCountInBackground().then((initialCount) => {
     const child = spawnDexCommand('sync', [], {
-      stdio: ['ignore', 'ignore', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     });
 
     // Don't let child process keep parent alive
     child.unref();
+
+    // Capture stderr for error reporting
+    let stderr = '';
+    child.stderr?.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
 
     child.on('close', (code) => {
       if (code === 0) {
@@ -106,12 +91,15 @@ function runSyncInBackground(
           onComplete({ newCount, diff: Math.max(0, newCount - initialCount) });
         });
       } else {
-        onComplete(null);
+        // Extract meaningful error from stderr
+        const errorLine = stderr.split('\n').find(line => line.includes('Error') || line.includes('error')) || stderr.trim();
+        const errorMsg = errorLine ? errorLine.slice(0, 100) : `Exit code ${code}`;
+        onComplete(null, errorMsg);
       }
     });
 
-    child.on('error', () => {
-      onComplete(null);
+    child.on('error', (err) => {
+      onComplete(null, err.message);
     });
   });
 }
@@ -119,30 +107,8 @@ function runSyncInBackground(
 // Get message count via child process (fast check for first load detection)
 function getMessageCountInBackground(): Promise<number> {
   return new Promise((resolve) => {
-    const dbPath = getLanceDBPath();
-    // Use dynamic import() to work with both bun -e and node -e
-    const script = `
-(async () => {
-  const lancedb = await import('@lancedb/lancedb');
-  try {
-    const db = await lancedb.connect('${dbPath}');
-    const tables = await db.tableNames();
-    if (tables.includes('messages')) {
-      const table = await db.openTable('messages');
-      const count = await table.countRows();
-      console.log(count);
-    } else {
-      console.log(0);
-    }
-  } catch (e) {
-    console.log(0);
-  }
-  process.exit(0);
-})();
-`;
-
     let resolved = false;
-    const child = spawn(runtimeCmd, ['-e', script], {
+    const child = spawnDexCommand('count', ['--messages'], {
       stdio: ['ignore', 'pipe', 'ignore'],
     });
 
@@ -156,7 +122,10 @@ function getMessageCountInBackground(): Promise<number> {
     child.on('close', () => {
       if (resolved) return;
       resolved = true;
-      const count = parseInt(output.trim(), 10);
+      // Parse last line (count command may have debug logs before the number)
+      const lines = output.trim().split('\n');
+      const lastLine = lines[lines.length - 1] || '0';
+      const count = parseInt(lastLine.trim(), 10);
       resolve(isNaN(count) ? 0 : count);
     });
 
@@ -166,13 +135,13 @@ function getMessageCountInBackground(): Promise<number> {
       resolve(0);
     });
 
-    // Timeout after 3 seconds
+    // Timeout after 5 seconds
     setTimeout(() => {
       if (resolved) return;
       resolved = true;
       child.kill();
       resolve(0);
-    }, 3000);
+    }, 5000);
   });
 }
 
@@ -187,6 +156,7 @@ interface FirstLoadSyncProgress {
   messagesIndexed: number;
   embeddingStarted?: boolean;
   extractionProgress?: { current: number; total: number };
+  errorMessage?: string;
 }
 
 // Run sync synchronously (blocking) - used only for first load
@@ -206,6 +176,12 @@ function runSyncBlocking(
 
     const child = spawnDexCommand('sync', [], {
       stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    // Capture stderr for error reporting
+    let stderr = '';
+    child.stderr?.on('data', (data: Buffer) => {
+      stderr += data.toString();
     });
 
     child.stdout?.on('data', (data: Buffer) => {
@@ -275,14 +251,19 @@ function runSyncBlocking(
           resolve({ newCount });
         });
       } else {
+        // Extract meaningful error from stderr
+        const errorLine = stderr.split('\n').find(line => line.includes('Error') || line.includes('error')) || stderr.trim();
+        const errorMsg = errorLine ? errorLine.slice(0, 100) : `Exit code ${code}`;
         progress.phase = 'error';
+        progress.errorMessage = errorMsg;
         onProgress({ ...progress });
         resolve(null);
       }
     });
 
-    child.on('error', () => {
+    child.on('error', (err) => {
       progress.phase = 'error';
+      progress.errorMessage = err.message;
       onProgress({ ...progress });
       resolve(null);
     });
@@ -471,7 +452,14 @@ function FirstLoadScreen({
         </Box>
       )}
 
-      <Text color="gray">First run - indexing your conversations</Text>
+      {progress.phase === 'error' && progress.errorMessage ? (
+        <Box flexDirection="column" alignItems="center">
+          <Text color="red">{progress.errorMessage}</Text>
+          <Text color="gray" dimColor>Run "dex sync --force" to retry</Text>
+        </Box>
+      ) : (
+        <Text color="gray">First run - indexing your conversations</Text>
+      )}
     </Box>
   );
 }
@@ -787,12 +775,12 @@ function UnifiedApp() {
     setSyncStatus({ phase: 'syncing', message: 'Syncing...' });
 
     // Run sync in separate child process to avoid blocking UI
-    runSyncInBackground((result) => {
+    runSyncInBackground((result, error) => {
       if (result) {
         setConversationCount(result.newCount);
         setSyncStatus({ phase: 'done', newConversations: result.diff });
       } else {
-        setSyncStatus({ phase: 'error', message: 'Sync failed' });
+        setSyncStatus({ phase: 'error', message: error || 'Sync failed' });
       }
     });
   }, []);

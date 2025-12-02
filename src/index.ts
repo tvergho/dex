@@ -100,6 +100,26 @@ program
   .option('--benchmark', 'Run benchmark to find optimal settings')
   .action(embedCommand);
 
+// Internal command for getting counts (used by unified.tsx background checks)
+program
+  .command('count', { hidden: true })
+  .option('--messages', 'Count messages')
+  .option('--conversations', 'Count conversations')
+  .action(async (options: { messages?: boolean; conversations?: boolean }) => {
+    const { connect } = await import('./db/index');
+    const { conversationRepo, messageRepo } = await import('./db/repository');
+    await connect();
+    if (options.messages) {
+      const count = await messageRepo.count();
+      console.log(count);
+    } else {
+      // Default to conversation count
+      const count = await conversationRepo.count();
+      console.log(count);
+    }
+    process.exit(0);
+  });
+
 // Default action when no subcommand is provided
 program.action(async () => {
   await unifiedCommand();

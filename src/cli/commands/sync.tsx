@@ -427,8 +427,23 @@ export async function runSync(
       );
     }
 
-    // If nothing new to sync, we're done
+    // If nothing new to sync, still check for pending embeddings before exiting
     if (conversationsToSync.length === 0) {
+      // Check for pending embeddings even if no new conversations
+      const pendingEmbeddings = await countPendingEmbeddings();
+      if (pendingEmbeddings > 0) {
+        setEmbeddingProgress({
+          status: 'idle',
+          total: pendingEmbeddings,
+          completed: 0,
+        });
+        spawnBackgroundEmbedding();
+        progress.embeddingStarted = true;
+      }
+
+      // Update sync cache for fast subsequent checks
+      updateSyncCache();
+
       progress.phase = 'done';
       progress.currentSource = undefined;
       progress.conversationsIndexed = 0;

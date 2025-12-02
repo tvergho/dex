@@ -529,6 +529,11 @@ export const conversationRepo = {
 // ============ Message Repository ============
 
 export const messageRepo = {
+  async count(): Promise<number> {
+    const table = await getMessagesTable();
+    return table.countRows();
+  },
+
   async getExistingIds(conversationId: string): Promise<Set<string>> {
     const table = await getMessagesTable();
     const allResults = await table.query().toArray();
