@@ -39,9 +39,9 @@ export function setEmbeddingProgress(progress: EmbeddingProgress): void {
 }
 
 // EmbeddingGemma-300M: 2.5x faster than Qwen3-0.6B, half the model size
-const MODEL_NAME = 'embeddinggemma-300m-q8.gguf';
+const MODEL_NAME = 'embeddinggemma-300M-Q8_0.gguf';
 const MODEL_URL =
-  'https://huggingface.co/unsloth/embeddinggemma-300m-GGUF/resolve/main/embeddinggemma-300m-q8.gguf';
+  'https://huggingface.co/unsloth/embeddinggemma-300m-GGUF/resolve/main/embeddinggemma-300M-Q8_0.gguf';
 export const EMBEDDING_DIMENSIONS = 768;
 
 // Max characters to keep (roughly ~6K tokens)
