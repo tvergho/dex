@@ -76,6 +76,10 @@ function createMockAdapter(config: MockAdapterConfig) {
       if (error?.phase === 'detect') throw new Error(error.message);
       return available;
     },
+    getQuickMtime: () => {
+      // Return null if unavailable, otherwise return a mock mtime
+      return available ? Date.now() : null;
+    },
     discover: async () => {
       if (error?.phase === 'discover') throw new Error(error.message);
       return fullLocations;
@@ -132,7 +136,7 @@ export function mockEmbeddings() {
   const mockModule = {
     setEmbeddingProgress: () => {},
     clearEmbeddingProgress: () => {},
-    EMBEDDING_DIMENSIONS: 1024,
+    EMBEDDING_DIMENSIONS: 768,
   };
   
   mock.module('../../src/embeddings/index', () => mockModule);

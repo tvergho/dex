@@ -31,7 +31,7 @@ afterEach(() => {
 
 describe('EMBEDDING_DIMENSIONS', () => {
   it('exports the correct embedding dimensions', () => {
-    expect(EMBEDDING_DIMENSIONS).toBe(1024);
+    expect(EMBEDDING_DIMENSIONS).toBe(768);
   });
 });
 
@@ -52,7 +52,7 @@ describe('getModelPath', () => {
   it('returns path to the model file', () => {
     const modelPath = getModelPath();
     expect(modelPath).toContain('models');
-    expect(modelPath).toContain('Qwen3-Embedding');
+    expect(modelPath).toContain('embeddinggemma');
     expect(modelPath).toEndWith('.gguf');
   });
 });
