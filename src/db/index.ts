@@ -22,8 +22,25 @@ function isCommitConflict(error: unknown): boolean {
 }
 
 /**
- * Retry a LanceDB operation with exponential backoff on commit conflicts.
- * This handles the case where concurrent operations try to modify the same table version.
+ * Check if an error is a transient LanceDB error that can be retried.
+ * This includes commit conflicts and "Not found" errors that occur when
+ * old data files are cleaned up while a query is running.
+ */
+export function isTransientError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const msg = error.message;
+    return isCommitConflict(error) ||
+           msg.includes('Not found') ||
+           msg.includes('Failed to get next batch') ||
+           msg.includes('.lance') ||  // Any .lance file error
+           msg.includes('LanceError');
+  }
+  return false;
+}
+
+/**
+ * Retry a LanceDB operation with exponential backoff on transient errors.
+ * This handles commit conflicts and race conditions during concurrent read/write operations.
  */
 export async function withRetry<T>(
   operation: () => Promise<T>,
@@ -38,7 +55,7 @@ export async function withRetry<T>(
     } catch (error) {
       lastError = error;
 
-      if (!isCommitConflict(error) || attempt === maxRetries) {
+      if (!isTransientError(error) || attempt === maxRetries) {
         throw error;
       }
 
@@ -174,6 +191,18 @@ export async function getMessagesTable(): Promise<Table> {
     await connect();
   }
   return messagesTable!;
+}
+
+/**
+ * Get a fresh messages table reference, bypassing the cache.
+ * Use this when you need to ensure you have the latest table version,
+ * such as during searches while embedding is running.
+ */
+export async function getFreshMessagesTable(): Promise<Table> {
+  // Create a completely fresh connection to get the latest table state
+  const dbPath = getLanceDBPath();
+  const freshDb = await lancedb.connect(dbPath);
+  return await freshDb.openTable('messages');
 }
 
 export async function getToolCallsTable(): Promise<Table> {

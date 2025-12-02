@@ -430,6 +430,7 @@ function SearchApp({
             {' '}— {formatConversationCount(response.totalConversations)}
             {response.totalMessages > 0 && `, ${formatMessageCount(response.totalMessages)}`}
             {' '}({response.searchTimeMs}ms)
+            {response.searchMode && ` [${response.searchMode}]`}
           </Text>
         </Box>
         <Box paddingX={1}>

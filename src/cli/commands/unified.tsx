@@ -1000,15 +1000,9 @@ function UnifiedApp() {
       navActions.setSelectedIndex(0);
       navActions.setViewMode('list');
     } catch (err) {
-      // Search failed - show user-friendly error
+      // Search failed - show the actual error
       const message = err instanceof Error ? err.message : 'Search failed';
-      if (message.includes('Model not found') || message.includes('llama-server not installed')) {
-        setSearchError('Search not ready. Run `dex sync` to set up.');
-      } else if (message.includes('failed to start')) {
-        setSearchError('Search engine failed to start. Try again.');
-      } else {
-        setSearchError('Search failed. Using basic text matching.');
-      }
+      setSearchError(message);
     } finally {
       setIsSearching(false);
     }
@@ -1188,7 +1182,11 @@ function UnifiedApp() {
             <>
               <Text color="gray"> / </Text>
               <Text color="white">{searchQuery}</Text>
-              <Text color="gray"> — {searchResults.totalConversations} results{scrollIndicator}</Text>
+              <Text color="gray"> — {searchResults.totalConversations} results</Text>
+              {searchResults.searchMode && (
+                <Text color="gray" dimColor> [{searchResults.searchMode}]</Text>
+              )}
+              <Text color="gray">{scrollIndicator}</Text>
             </>
           ) : (
             <>

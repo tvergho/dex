@@ -189,6 +189,7 @@ export const SearchResponse = z.object({
   totalConversations: z.number(),
   totalMessages: z.number(),
   searchTimeMs: z.number(),
+  searchMode: z.enum(['hybrid', 'fts', 'basic']).optional(), // hybrid=vector+FTS, fts=FTS only, basic=substring
 });
 export type SearchResponse = z.infer<typeof SearchResponse>;
 

@@ -1,12 +1,14 @@
 import {
   getConversationsTable,
   getMessagesTable,
+  getFreshMessagesTable,
   getToolCallsTable,
   getSyncStateTable,
   getFilesTable,
   getMessageFilesTable,
   getFileEditsTable,
   withRetry,
+  isTransientError,
   stripToolOutputs,
 } from './index';
 import {
@@ -635,67 +637,113 @@ export const messageRepo = {
     });
   },
 
-  async search(query: string, limit = 50): Promise<MessageMatch[]> {
-    const table = await getMessagesTable();
+  async search(query: string, limit = 50): Promise<{ matches: MessageMatch[]; mode: 'hybrid' | 'fts' | 'basic' }> {
+    // Wrap entire search in retry to handle transient errors during embedding
+    // Use getFreshMessagesTable to avoid stale table references after cleanup
+    return withRetry(async () => {
+      const table = await getFreshMessagesTable();
 
-    // Try hybrid search with RRF (Reciprocal Rank Fusion)
-    // Combines FTS keyword matching with vector semantic search
-    try {
-      const queryVector = await embedQuery(query);
-      const reranker = await rerankers.RRFReranker.create();
+      // Try hybrid search with RRF (Reciprocal Rank Fusion)
+      // Combines FTS keyword matching with vector semantic search
+      try {
+        const queryVector = await embedQuery(query);
+        const reranker = await rerankers.RRFReranker.create();
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const results = await (table.search(queryVector) as any)
-        .fullTextSearch(query)
-        .rerank(reranker)
-        .select(['id', 'conversation_id', 'role', 'content', 'message_index', '_score', '_distance', '_relevance_score'])
-        .limit(limit)
-        .toArray() as Record<string, unknown>[];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const results = await (table.search(queryVector) as any)
+          .fullTextSearch(query)
+          .rerank(reranker)
+          .select(['id', 'conversation_id', 'role', 'content', 'message_index'])
+          .limit(limit)
+          .toArray() as Record<string, unknown>[];
 
-      return results
-        .filter((row: Record<string, unknown>) => {
-          const content = row.content as string;
-          return content && content.trim().length > 0;
-        })
-        .map((row: Record<string, unknown>, index: number) => {
-          const content = row.content as string;
-          const { snippet, highlightRanges } = extractSnippet(content, query);
+        const matches = results
+          .filter((row: Record<string, unknown>) => {
+            const content = row.content as string;
+            return content && content.trim().length > 0;
+          })
+          .map((row: Record<string, unknown>, index: number) => {
+            const content = row.content as string;
+            const { snippet, highlightRanges } = extractSnippet(content, query);
 
-          // After reranking, score is in _relevance_score or use rank-based score
-          const score = (row._relevance_score as number) ??
-                        (row._score as number) ??
-                        1 / (index + 1);
+            // After reranking, use rank-based score (results are already sorted by relevance)
+            const score = 1 / (index + 1);
 
-          return {
-            messageId: row.id as string,
-            conversationId: row.conversation_id as string,
-            role: row.role as MessageMatch['role'],
-            content,
-            snippet,
-            highlightRanges,
-            score,
-            messageIndex: row.message_index as number,
-          };
-        });
-    } catch {
-      // Fallback to FTS-only if vector search unavailable
-    }
+            return {
+              messageId: row.id as string,
+              conversationId: row.conversation_id as string,
+              role: row.role as MessageMatch['role'],
+              content,
+              snippet,
+              highlightRanges,
+              score,
+              messageIndex: row.message_index as number,
+            };
+          });
+        return { matches, mode: 'hybrid' as const };
+      } catch (err) {
+        // Re-throw transient errors so withRetry can handle them
+        if (isTransientError(err)) throw err;
+        // Fallback to FTS-only if vector search unavailable
+      }
 
-    // Fallback: FTS-only search
-    try {
-      const ftsResults = await table
-        .search(query, 'fts')
-        .select(['id', 'conversation_id', 'role', 'content', 'message_index', '_score'])
-        .limit(limit)
+      // Fallback: FTS-only search
+      try {
+        const ftsResults = await table
+          .search(query, 'fts')
+          .select(['id', 'conversation_id', 'role', 'content', 'message_index', '_score'])
+          .limit(limit)
+          .toArray();
+
+        const matches = ftsResults
+          .filter((row) => {
+            const content = row.content as string;
+            return content && content.trim().length > 0;
+          })
+          .map((row, rank) => {
+            const content = row.content as string;
+            const { snippet, highlightRanges } = extractSnippet(content, query);
+
+            return {
+              messageId: row.id as string,
+              conversationId: row.conversation_id as string,
+              role: row.role as MessageMatch['role'],
+              content,
+              snippet,
+              highlightRanges,
+              score: (row._score as number) ?? 1 / (rank + 1),
+              messageIndex: row.message_index as number,
+            };
+          });
+        return { matches, mode: 'fts' as const };
+      } catch (err) {
+        // Re-throw transient errors so withRetry can handle them
+        if (isTransientError(err)) throw err;
+        // FTS index might be invalid, fall back to substring matching
+      }
+
+      // Last resort: basic substring matching
+      const allMessages = await table
+        .query()
+        .select(['id', 'conversation_id', 'role', 'content', 'message_index'])
+        .limit(5000)
         .toArray();
 
-      return ftsResults
+      const queryLower = query.toLowerCase();
+      const queryTerms = queryLower.split(/\s+/).filter((t) => t.length > 2);
+
+      const matches = allMessages
         .filter((row) => {
           const content = row.content as string;
-          return content && content.trim().length > 0;
+          if (!content) return false;
+          const contentLower = content.toLowerCase();
+          return queryTerms.some((term) => contentLower.includes(term));
         })
+        .slice(0, limit)
         .map((row, rank) => {
           const content = row.content as string;
+          const contentLower = content.toLowerCase();
+          const matchCount = queryTerms.filter((term) => contentLower.includes(term)).length;
           const { snippet, highlightRanges } = extractSnippet(content, query);
 
           return {
@@ -705,49 +753,12 @@ export const messageRepo = {
             content,
             snippet,
             highlightRanges,
-            score: (row._score as number) ?? 1 / (rank + 1),
+            score: matchCount / queryTerms.length,
             messageIndex: row.message_index as number,
           };
         });
-    } catch {
-      // FTS index might be invalid, fall back to substring matching
-    }
-
-    // Last resort: basic substring matching
-    const allMessages = await table
-      .query()
-      .select(['id', 'conversation_id', 'role', 'content', 'message_index'])
-      .limit(5000)
-      .toArray();
-
-    const queryLower = query.toLowerCase();
-    const queryTerms = queryLower.split(/\s+/).filter((t) => t.length > 2);
-
-    return allMessages
-      .filter((row) => {
-        const content = row.content as string;
-        if (!content) return false;
-        const contentLower = content.toLowerCase();
-        return queryTerms.some((term) => contentLower.includes(term));
-      })
-      .slice(0, limit)
-      .map((row, rank) => {
-        const content = row.content as string;
-        const contentLower = content.toLowerCase();
-        const matchCount = queryTerms.filter((term) => contentLower.includes(term)).length;
-        const { snippet, highlightRanges } = extractSnippet(content, query);
-
-        return {
-          messageId: row.id as string,
-          conversationId: row.conversation_id as string,
-          role: row.role as MessageMatch['role'],
-          content,
-          snippet,
-          highlightRanges,
-          score: matchCount / queryTerms.length,
-          messageIndex: row.message_index as number,
-        };
-      });
+      return { matches, mode: 'basic' as const };
+    });
   },
 };
 
@@ -1237,7 +1248,7 @@ export async function search(query: string, limit = 50): Promise<SearchResponse>
   const startTime = Date.now();
 
   // 1. Search messages
-  const messageMatches = await messageRepo.search(query, limit);
+  const { matches: messageMatches, mode: searchMode } = await messageRepo.search(query, limit);
 
   if (messageMatches.length === 0) {
     return {
@@ -1246,6 +1257,7 @@ export async function search(query: string, limit = 50): Promise<SearchResponse>
       totalConversations: 0,
       totalMessages: 0,
       searchTimeMs: Date.now() - startTime,
+      searchMode,
     };
   }
 
@@ -1290,5 +1302,6 @@ export async function search(query: string, limit = 50): Promise<SearchResponse>
     totalConversations: results.length,
     totalMessages: messageMatches.length,
     searchTimeMs: Date.now() - startTime,
+    searchMode,
   };
 }
