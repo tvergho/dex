@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, createWriteStream, writeFileSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, createWriteStream, writeFileSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { getDataDir } from '../utils/config';
 import {
@@ -20,6 +20,82 @@ export interface EmbeddingProgress {
 
 function getProgressPath(): string {
   return join(getDataDir(), 'embedding-progress.json');
+}
+
+// ============ Embed Lock to Prevent Multiple Processes ============
+
+const EMBED_LOCK_FILE = 'embed.lock';
+const EMBED_LOCK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes - stale lock threshold
+
+interface EmbedLockInfo {
+  pid: number;
+  startedAt: number;
+}
+
+function getEmbedLockPath(): string {
+  return join(getDataDir(), EMBED_LOCK_FILE);
+}
+
+/**
+ * Try to acquire the embed lock. Returns true if acquired, false if another process holds it.
+ */
+export function acquireEmbedLock(): boolean {
+  const lockPath = getEmbedLockPath();
+
+  // Check for existing lock
+  if (existsSync(lockPath)) {
+    try {
+      const lockData = JSON.parse(readFileSync(lockPath, 'utf-8')) as EmbedLockInfo;
+      const lockAge = Date.now() - lockData.startedAt;
+
+      // Check if lock is stale
+      if (lockAge < EMBED_LOCK_TIMEOUT_MS) {
+        // Check if process is still running
+        try {
+          process.kill(lockData.pid, 0); // Signal 0 = check if process exists
+          return false; // Process still running, lock is valid
+        } catch {
+          // Process is dead, lock is stale - fall through to acquire
+        }
+      }
+      // Lock is stale, remove it
+      unlinkSync(lockPath);
+    } catch {
+      // Corrupted lock file, remove it
+      try { unlinkSync(lockPath); } catch { /* ignore */ }
+    }
+  }
+
+  // Acquire lock
+  const lockInfo: EmbedLockInfo = {
+    pid: process.pid,
+    startedAt: Date.now(),
+  };
+
+  try {
+    writeFileSync(lockPath, JSON.stringify(lockInfo), { flag: 'wx' }); // wx = fail if exists
+    return true;
+  } catch {
+    return false; // Another process beat us to it
+  }
+}
+
+/**
+ * Release the embed lock.
+ */
+export function releaseEmbedLock(): void {
+  const lockPath = getEmbedLockPath();
+  try {
+    if (existsSync(lockPath)) {
+      const lockData = JSON.parse(readFileSync(lockPath, 'utf-8')) as EmbedLockInfo;
+      // Only release if we own the lock
+      if (lockData.pid === process.pid) {
+        unlinkSync(lockPath);
+      }
+    }
+  } catch {
+    // Ignore errors during cleanup
+  }
 }
 
 export function getEmbeddingProgress(): EmbeddingProgress {
@@ -200,17 +276,18 @@ export function isEmbeddingInProgress(): boolean {
   }
 
   // Check if the embedding process is actually still running by checking for llama-server
-  // or embed.ts processes. If no process is running, the status file is stale.
+  // or dex embed processes. If no process is running, the status file is stale.
   try {
-    // Use pgrep to check for running embed.ts or llama-server processes
+    // Use pgrep to check for running dex embed or llama-server processes
     // This is a lightweight check that doesn't require spawning a shell
     const { execSync } = require('child_process');
     if (process.platform !== 'win32') {
       try {
-        execSync('pgrep -f "bun.*embed\\.ts" 2>/dev/null', { stdio: 'pipe' });
+        // Check for any embed process (dex embed, embed.ts, or node/bun running embed)
+        execSync('pgrep -f "dex embed" 2>/dev/null || pgrep -f "embed\\.ts" 2>/dev/null || pgrep -f "node.*embed" 2>/dev/null || pgrep -f "bun.*embed" 2>/dev/null', { stdio: 'pipe', shell: true });
         return true; // Process found
       } catch {
-        // No embed.ts process found, check llama-server
+        // No embed process found, check llama-server
         try {
           execSync('pgrep -f "llama-server" 2>/dev/null', { stdio: 'pipe' });
           return true; // Process found
@@ -222,7 +299,7 @@ export function isEmbeddingInProgress(): boolean {
     } else {
       // On Windows, use tasklist to check for processes
       try {
-        execSync('tasklist /FI "IMAGENAME eq bun.exe" /FI "WINDOWTITLE eq *embed.ts*" 2>nul', { stdio: 'pipe' });
+        execSync('tasklist /FI "IMAGENAME eq node.exe" 2>nul | findstr /I "embed"', { stdio: 'pipe' });
         return true; // Process found
       } catch {
         try {

@@ -17,6 +17,8 @@ import {
   getEmbeddingProgress,
   isEmbeddingInProgress,
   clearEmbeddingProgress,
+  acquireEmbedLock,
+  releaseEmbedLock,
   EMBEDDING_DIMENSIONS,
 } from '../../embeddings/index';
 import {
@@ -264,15 +266,27 @@ async function runWithServer(
 
 
 async function runBackgroundEmbedding(): Promise<void> {
-  // Check if another embedding process is actually running
-  // isEmbeddingInProgress now checks for actual processes, not just status file
-  if (isEmbeddingInProgress()) {
-    console.log('Embedding already in progress, exiting');
+  // Try to acquire the embed lock - this is atomic and prevents race conditions
+  if (!acquireEmbedLock()) {
+    console.log('Another embedding process is running, exiting');
     return;
   }
 
-  // Clear any stale progress state from crashed runs
-  clearEmbeddingProgress();
+  // Also check the legacy progress-based detection
+  if (isEmbeddingInProgress()) {
+    console.log('Embedding already in progress, exiting');
+    releaseEmbedLock();
+    return;
+  }
+
+  // Immediately mark as in-progress to prevent race conditions with other dex instances
+  // This must happen BEFORE any async work to ensure other processes see it
+  setEmbeddingProgress({
+    status: 'downloading',
+    total: 0,
+    completed: 0,
+    startedAt: new Date().toISOString(),
+  });
 
   try {
     await connect();
@@ -370,6 +384,7 @@ async function runBackgroundEmbedding(): Promise<void> {
     });
 
     console.log('Embedding complete!');
+    releaseEmbedLock();
   } catch (error) {
     console.error('Embedding failed:', error);
     setEmbeddingProgress({
@@ -378,6 +393,7 @@ async function runBackgroundEmbedding(): Promise<void> {
       completed: getEmbeddingProgress().completed,
       error: error instanceof Error ? error.message : String(error),
     });
+    releaseEmbedLock();
     await stopLlamaServer();
     process.exit(1);
   }

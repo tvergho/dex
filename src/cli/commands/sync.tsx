@@ -12,6 +12,7 @@ import { render, Box, Text } from 'ink';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { spawnBackgroundCommand } from '../../utils/spawn';
+import { isEmbeddingInProgress } from '../../embeddings/index';
 
 const execAsync = promisify(exec);
 import { adapters } from '../../adapters/index';
@@ -74,7 +75,7 @@ async function killEmbeddingProcesses(): Promise<void> {
     // Find and kill any bun processes running embed.ts
     // This is platform-specific but works on macOS/Linux
     if (process.platform !== 'win32') {
-      await execAsync('pkill -f "bun.*embed\\.ts" 2>/dev/null || true').catch(() => {});
+      await execAsync('pkill -f "dex embed" 2>/dev/null; pkill -f "embed\\.ts" 2>/dev/null; pkill -f "node.*embed" 2>/dev/null; pkill -f "bun.*embed" 2>/dev/null; true').catch(() => {});
     }
     // Also kill any llama-server processes that might be running
     if (process.platform !== 'win32') {
@@ -240,6 +241,10 @@ function SyncUI({ progress }: { progress: SyncProgress }) {
 }
 
 function spawnBackgroundEmbedding(): void {
+  // Check if embedding is already running to prevent duplicate processes
+  if (isEmbeddingInProgress()) {
+    return;
+  }
   // Spawn background embedding process with low priority (nice 19 = lowest priority)
   // This minimizes impact on user's foreground work
   spawnBackgroundCommand('embed');
