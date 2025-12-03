@@ -6,16 +6,13 @@
  */
 
 import { spawn, type ChildProcess } from 'child_process';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 import { homedir } from 'os';
 import { mkdirSync, existsSync } from 'fs';
 import { getCodexCredentials } from './credentials.js';
+import { getOpencodeBinPath } from '../../utils/paths.js';
 
-// Get the absolute path to the opencode binary in node_modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const OPENCODE_BIN = join(__dirname, '..', '..', '..', 'node_modules', '.bin', 'opencode');
+const OPENCODE_BIN = getOpencodeBinPath();
 
 // Use a separate local OpenCode data directory for Codex operations
 const DEX_OPENCODE_CODEX_HOME = join(homedir(), '.dex', 'opencode-codex');

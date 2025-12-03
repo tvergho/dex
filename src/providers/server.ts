@@ -7,16 +7,14 @@
  */
 
 import { spawn, type ChildProcess } from 'child_process';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 import { homedir } from 'os';
 import { mkdirSync, existsSync } from 'fs';
 import { getClaudeCodeCredentials } from './claude-code/credentials.js';
 import { getCodexCredentials } from './codex/credentials.js';
+import { getOpencodeBinPath } from '../utils/paths.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const OPENCODE_BIN = join(__dirname, '..', '..', 'node_modules', '.bin', 'opencode');
+const OPENCODE_BIN = getOpencodeBinPath();
 
 // Isolated data directory for dex's OpenCode instance
 const DEX_OPENCODE_HOME = join(homedir(), '.dex', 'opencode');

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
-import { withRetry, acquireSyncLock, releaseSyncLock } from '../../../src/db/index';
+import { withRetry, acquireSyncLock, releaseSyncLock, isTransientError } from '../../../src/db/index';
 
 // Mock the config module to use a temp directory
 const originalEnv = process.env.DEX_DATA_DIR;
@@ -193,6 +193,88 @@ describe('acquireSyncLock / releaseSyncLock', () => {
     
     // Lock file should still exist
     expect(existsSync(lockPath)).toBe(true);
+  });
+});
+
+describe('isTransientError', () => {
+  it('returns true for commit conflict errors', () => {
+    expect(isTransientError(new Error('Commit conflict detected'))).toBe(true);
+    expect(isTransientError(new Error('concurrent commit error'))).toBe(true);
+  });
+
+  it('returns true for Not found errors', () => {
+    expect(isTransientError(new Error('Not found: some/file.lance'))).toBe(true);
+    expect(isTransientError(new Error('External error: Not found'))).toBe(true);
+  });
+
+  it('returns true for Failed to get next batch errors', () => {
+    expect(isTransientError(new Error('Failed to get next batch from stream'))).toBe(true);
+  });
+
+  it('returns true for .lance file errors', () => {
+    expect(isTransientError(new Error('Error reading file.lance'))).toBe(true);
+    expect(isTransientError(new Error('messages.lance not accessible'))).toBe(true);
+  });
+
+  it('returns true for LanceError', () => {
+    expect(isTransientError(new Error('LanceError: IO error'))).toBe(true);
+  });
+
+  it('returns false for non-transient errors', () => {
+    expect(isTransientError(new Error('Some other error'))).toBe(false);
+    expect(isTransientError(new Error('Database connection failed'))).toBe(false);
+    expect(isTransientError(new Error('Invalid query'))).toBe(false);
+  });
+
+  it('returns false for non-Error objects', () => {
+    expect(isTransientError('string error')).toBe(false);
+    expect(isTransientError(null)).toBe(false);
+    expect(isTransientError(undefined)).toBe(false);
+    expect(isTransientError({ message: 'Not found' })).toBe(false);
+  });
+});
+
+describe('withRetry transient errors', () => {
+  it('retries on Not found errors', async () => {
+    let attempts = 0;
+    const result = await withRetry(async () => {
+      attempts++;
+      if (attempts < 2) {
+        throw new Error('Not found: some/data.lance');
+      }
+      return 'success';
+    });
+
+    expect(result).toBe('success');
+    expect(attempts).toBe(2);
+  });
+
+  it('retries on Failed to get next batch errors', async () => {
+    let attempts = 0;
+    const result = await withRetry(async () => {
+      attempts++;
+      if (attempts < 2) {
+        throw new Error('Failed to get next batch from stream: lance error');
+      }
+      return 'success';
+    });
+
+    expect(result).toBe('success');
+    expect(attempts).toBe(2);
+  });
+
+  it('retries on LanceError', async () => {
+    let attempts = 0;
+    const result = await withRetry(async () => {
+      attempts++;
+      if (attempts < 3) {
+        throw new Error('LanceError(IO): External error');
+      }
+      return 'success';
+    });
+
+    expect(result).toBe('success');
+    expect(attempts).toBe(3);
   });
 });
 
