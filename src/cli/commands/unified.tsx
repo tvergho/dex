@@ -772,8 +772,16 @@ function UnifiedApp() {
 
     setSyncStatus({ phase: 'syncing', message: 'Syncing...' });
 
+    // Spawn embed worker immediately in parallel with sync.
+    // If sync has nothing new, embed starts processing right away.
+    // If sync adds new data, it will kill the embed process and respawn after.
+    // This avoids delay when sync runs but finds nothing to sync.
+    if (!isEmbeddingInProgress()) {
+      spawnBackgroundCommand('embed');
+    }
+
     // Run sync in separate child process to avoid blocking UI
-    // Note: sync process will spawn embed worker when it completes
+    // Note: sync process will respawn embed worker when it completes if needed
     runSyncInBackground((result, error) => {
       if (result) {
         setConversationCount(result.newCount);
