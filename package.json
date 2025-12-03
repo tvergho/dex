@@ -24,17 +24,18 @@
     "conversations"
   ],
   "bin": {
-    "dex": "./dist/index.js"
+    "dex": "./bin/dex"
   },
   "files": [
-    "dist"
+    "dist",
+    "bin"
   ],
   "engines": {
     "node": ">=18 <23"
   },
   "scripts": {
-    "dev": "tsx src/index.ts",
-    "dev:bun": "bun run src/index.ts",
+    "dev": "LANCEDB_LOG=error tsx src/index.ts",
+    "dev:bun": "LANCEDB_LOG=error bun run src/index.ts",
     "build": "tsup src/index.ts --format esm --target node18 --shims",
     "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit",

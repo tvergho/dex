@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Wrapper to set LANCEDB_LOG before running dex
+# This suppresses LanceDB deprecation warnings from the Rust layer
+export LANCEDB_LOG="${LANCEDB_LOG:-error}"
+exec node "$(dirname "$0")/../dist/index.js" "$@"
