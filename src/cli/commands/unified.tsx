@@ -1129,8 +1129,9 @@ function UnifiedApp() {
     }
   });
 
-  // First load screen - blocks until sync completes
-  if (!firstLoadComplete) {
+  // First load screen - only show when confirmed first load (isFirstLoad === true)
+  // Skip when still checking (isFirstLoad === null) - just show home screen
+  if (isFirstLoad === true && !firstLoadComplete) {
     return (
       <FirstLoadScreen
         width={width}
