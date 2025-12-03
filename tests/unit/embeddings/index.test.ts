@@ -8,6 +8,8 @@ import {
   isEmbeddingInProgress,
   getModelsDir,
   getModelPath,
+  acquireEmbedLock,
+  releaseEmbedLock,
   EMBEDDING_DIMENSIONS,
   type EmbeddingProgress,
 } from '../../../src/embeddings/index';
@@ -183,6 +185,112 @@ describe('isEmbeddingInProgress', () => {
 
   it('returns false when no progress file exists', () => {
     expect(isEmbeddingInProgress()).toBe(false);
+  });
+});
+
+describe('acquireEmbedLock', () => {
+  afterEach(() => {
+    // Clean up any lock files
+    const lockPath = join(tempDir, 'embed.lock');
+    if (existsSync(lockPath)) {
+      rmSync(lockPath);
+    }
+  });
+
+  it('acquires lock when no lock exists', () => {
+    const acquired = acquireEmbedLock();
+    expect(acquired).toBe(true);
+    expect(existsSync(join(tempDir, 'embed.lock'))).toBe(true);
+  });
+
+  it('writes correct lock info', () => {
+    acquireEmbedLock();
+    const lockPath = join(tempDir, 'embed.lock');
+    const lockData = JSON.parse(readFileSync(lockPath, 'utf-8'));
+    expect(lockData.pid).toBe(process.pid);
+    expect(typeof lockData.startedAt).toBe('number');
+    expect(lockData.startedAt).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('fails to acquire lock when already held by current process', () => {
+    const first = acquireEmbedLock();
+    expect(first).toBe(true);
+
+    // Second attempt should fail since we already hold it
+    const second = acquireEmbedLock();
+    expect(second).toBe(false);
+  });
+
+  it('acquires lock when existing lock has dead PID', () => {
+    // Write a lock with a PID that definitely doesn't exist
+    const lockPath = join(tempDir, 'embed.lock');
+    writeFileSync(lockPath, JSON.stringify({
+      pid: 999999999, // Very unlikely to be a real process
+      startedAt: Date.now(),
+    }));
+
+    const acquired = acquireEmbedLock();
+    expect(acquired).toBe(true);
+
+    // Lock should now be owned by us
+    const lockData = JSON.parse(readFileSync(lockPath, 'utf-8'));
+    expect(lockData.pid).toBe(process.pid);
+  });
+
+  it('acquires lock when existing lock is stale (old timestamp)', () => {
+    const lockPath = join(tempDir, 'embed.lock');
+    // Write a lock that's older than the timeout (10 minutes)
+    writeFileSync(lockPath, JSON.stringify({
+      pid: process.pid,
+      startedAt: Date.now() - 15 * 60 * 1000, // 15 minutes ago
+    }));
+
+    const acquired = acquireEmbedLock();
+    expect(acquired).toBe(true);
+  });
+
+  it('handles corrupted lock file', () => {
+    const lockPath = join(tempDir, 'embed.lock');
+    writeFileSync(lockPath, 'not valid json');
+
+    const acquired = acquireEmbedLock();
+    expect(acquired).toBe(true);
+  });
+});
+
+describe('releaseEmbedLock', () => {
+  it('removes lock file when owned by current process', () => {
+    acquireEmbedLock();
+    const lockPath = join(tempDir, 'embed.lock');
+    expect(existsSync(lockPath)).toBe(true);
+
+    releaseEmbedLock();
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it('does not remove lock file owned by another process', () => {
+    const lockPath = join(tempDir, 'embed.lock');
+    writeFileSync(lockPath, JSON.stringify({
+      pid: 999999999, // Different PID
+      startedAt: Date.now(),
+    }));
+
+    releaseEmbedLock();
+    // Lock should still exist since we don't own it
+    expect(existsSync(lockPath)).toBe(true);
+  });
+
+  it('does nothing when no lock exists', () => {
+    // Should not throw
+    releaseEmbedLock();
+  });
+
+  it('handles corrupted lock file gracefully', () => {
+    const lockPath = join(tempDir, 'embed.lock');
+    writeFileSync(lockPath, 'not valid json');
+
+    // Should not throw
+    releaseEmbedLock();
   });
 });
 
