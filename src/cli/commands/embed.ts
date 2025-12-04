@@ -27,6 +27,7 @@ import {
   startLlamaServer,
   stopLlamaServer,
   embedBatchViaServer,
+  getLlamaServerPid,
 } from '../../embeddings/llama-server';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -40,7 +41,8 @@ interface EmbedConfig {
   maxTextChars: number;
   batchDelayMs: number;
   benchmarkedAt?: string;
-  throughput?: number; // messages per second
+  throughput?: number;  // messages per second
+  efficiency?: number;  // messages per CPU-second (energy efficiency proxy)
 }
 
 const DEFAULT_CONFIG: EmbedConfig = {
@@ -92,6 +94,10 @@ const FTS_REBUILD_EVERY_BATCH = true;
 // LanceDB is append-only and creates a new version for each mergeInsert.
 // Without cleanup, embedding 13K messages creates ~400 versions = 400x bloat!
 const CLEANUP_EVERY_N_BATCHES = 10;
+
+// Max rows per mergeInsert to avoid LanceDB OOM during external sort
+// This is separate from SERVER_BATCH_SIZE - we can embed 256 at a time but write 100 at a time
+const DB_WRITE_BATCH_SIZE = 100;
 
 // Rebuild vector index every N messages to enable semantic search during embedding
 // Without this, vector search works but does brute-force scan until embedding completes
@@ -166,6 +172,36 @@ async function runWithServer(
 ): Promise<{ success: boolean; error?: string }> {
   const modelPath = getModelPath();
 
+  // Helper to write a batch to DB with retries
+  async function writeBatchToDb(rows: NonNullable<ReturnType<typeof buildRow>>[]) {
+    if (rows.length === 0) return;
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        await table.mergeInsert('id').whenMatchedUpdateAll().execute(rows);
+        break;
+      } catch (err) {
+        retries--;
+        if (retries === 0) throw err;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+  }
+
+  // Helper to build a row from message + vector
+  function buildRow(msg: MessageRow, vec: number[] | null) {
+    if (!vec || vec.length !== EMBEDDING_DIMENSIONS) return null;
+    return {
+      id: msg.id,
+      conversation_id: msg.conversation_id,
+      role: msg.role,
+      content: msg.content,
+      timestamp: msg.timestamp,
+      message_index: msg.message_index,
+      vector: vec,
+    };
+  }
+
   try {
     // Download llama-server if needed
     if (!isLlamaServerInstalled()) {
@@ -182,7 +218,11 @@ async function runWithServer(
     const port = await startLlamaServer(modelPath);
     console.log(`llama-server started on port ${port}`);
 
-    // Process in batches
+    // Pending rows to write (accumulate until DB_WRITE_BATCH_SIZE)
+    let pendingRows: NonNullable<ReturnType<typeof buildRow>>[] = [];
+    let dbWriteCount = 0;
+
+    // Process in batches (large batches for GPU efficiency)
     const totalBatches = Math.ceil(messages.length / SERVER_BATCH_SIZE);
     for (let i = 0; i < messages.length; i += SERVER_BATCH_SIZE) {
       const batch = messages.slice(i, i + SERVER_BATCH_SIZE);
@@ -199,49 +239,29 @@ async function runWithServer(
         console.warn(`Warning: ${vectors.length - validVectors.length} invalid vectors in batch`);
       }
 
-      // Build full rows with updated vectors for batch mergeInsert
-      const updatedRows = batch
-        .map((msg, j) => {
-          const vec = vectors[j];
-          if (!vec || vec.length !== EMBEDDING_DIMENSIONS) return null;
-          return {
-            id: msg.id,
-            conversation_id: msg.conversation_id,
-            role: msg.role,
-            content: msg.content,
-            timestamp: msg.timestamp,
-            message_index: msg.message_index,
-            vector: vec,
-          };
-        })
-        .filter((row): row is NonNullable<typeof row> => row !== null);
+      // Build rows and add to pending
+      for (let j = 0; j < batch.length; j++) {
+        const row = buildRow(batch[j]!, vectors[j] ?? null);
+        if (row) pendingRows.push(row);
+      }
 
-      // Use mergeInsert for batch update
-      if (updatedRows.length > 0) {
-        let retries = 3;
-        while (retries > 0) {
-          try {
-            await table.mergeInsert('id').whenMatchedUpdateAll().execute(updatedRows);
-            break;
-          } catch (err) {
-            retries--;
-            if (retries === 0) throw err;
-            await new Promise((r) => setTimeout(r, 200));
-          }
+      // Write to DB in smaller chunks to avoid LanceDB OOM
+      while (pendingRows.length >= DB_WRITE_BATCH_SIZE) {
+        const writeChunk = pendingRows.slice(0, DB_WRITE_BATCH_SIZE);
+        pendingRows = pendingRows.slice(DB_WRITE_BATCH_SIZE);
+
+        await writeBatchToDb(writeChunk);
+        dbWriteCount++;
+
+        // Rebuild FTS index after every DB write to keep search working
+        if (FTS_REBUILD_EVERY_BATCH) {
+          await rebuildFtsIndex();
         }
-      }
 
-      // Rebuild FTS index after every batch to keep search working
-      // mergeInsert invalidates the index, so we must rebuild immediately
-      if (FTS_REBUILD_EVERY_BATCH) {
-        await rebuildFtsIndex();
-      }
-
-      // Clean up old versions periodically to prevent disk space bloat
-      // Each mergeInsert creates a new version - without cleanup this causes 1000x+ bloat
-      const batchNumber = Math.floor(i / SERVER_BATCH_SIZE) + 1;
-      if (batchNumber % CLEANUP_EVERY_N_BATCHES === 0) {
-        await cleanupOldVersions();
+        // Clean up old versions periodically
+        if (dbWriteCount % CLEANUP_EVERY_N_BATCHES === 0) {
+          await cleanupOldVersions();
+        }
       }
 
       // Rebuild vector index periodically so semantic search works during embedding
@@ -264,6 +284,14 @@ async function runWithServer(
       // Optional pause between batches (default 0 for max throughput)
       if (BATCH_DELAY_MS > 0 && i + SERVER_BATCH_SIZE < messages.length) {
         await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
+      }
+    }
+
+    // Write any remaining pending rows
+    if (pendingRows.length > 0) {
+      await writeBatchToDb(pendingRows);
+      if (FTS_REBUILD_EVERY_BATCH) {
+        await rebuildFtsIndex();
       }
     }
 
@@ -450,18 +478,23 @@ async function runBackgroundEmbedding(): Promise<void> {
 
 interface BenchmarkResult {
   batchSize: number;
-  throughput: number; // messages per second
-  cpuUsage: number;   // percentage (0-100)
+  throughput: number;    // messages per second
+  cpuUsage: number;      // average CPU % of llama-server (0-100+, can exceed 100 on multi-core)
+  gpuUsage: number;      // average GPU % (0-100) from macOS ioreg
+  memoryMB: number;      // peak memory usage in MB
+  energyProxy: number;   // CPU-seconds (cpuUsage * elapsed / 100) - proxy for energy consumption
+  efficiency: number;    // messages per CPU-second (higher = more energy efficient)
   success: boolean;
   error?: string;
 }
 
 /**
- * Get CPU usage percentage on macOS using ps
+ * Get CPU usage percentage for a process using ps
+ * Returns instantaneous CPU % (can exceed 100% on multi-core)
  */
-function getCpuUsage(pid: number): number {
+function getProcessCpuUsage(pid: number): number {
   try {
-    const output = execSync(`ps -p ${pid} -o %cpu | tail -1`, { encoding: 'utf-8' });
+    const output = execSync(`ps -p ${pid} -o %cpu= 2>/dev/null`, { encoding: 'utf-8' });
     return parseFloat(output.trim()) || 0;
   } catch {
     return 0;
@@ -469,38 +502,152 @@ function getCpuUsage(pid: number): number {
 }
 
 /**
- * Test a specific batch size and measure throughput + CPU usage
+ * Get memory usage (RSS) for a process in MB
+ */
+function getProcessMemoryMB(pid: number): number {
+  try {
+    // rss is in KB on macOS/Linux
+    const output = execSync(`ps -p ${pid} -o rss= 2>/dev/null`, { encoding: 'utf-8' });
+    const rssKB = parseInt(output.trim(), 10) || 0;
+    return rssKB / 1024;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Get GPU utilization on macOS via ioreg (no sudo required)
+ * Returns device utilization percentage (0-100)
+ */
+function getGpuUtilization(): number {
+  if (process.platform !== 'darwin') return 0;
+  try {
+    const output = execSync(
+      `ioreg -r -d 1 -c IOAccelerator 2>/dev/null | grep -o '"Device Utilization %"=[0-9]*' | head -1`,
+      { encoding: 'utf-8' }
+    );
+    const match = output.match(/=(\d+)/);
+    return match && match[1] ? parseInt(match[1], 10) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+interface ResourceSamples {
+  cpuSamples: number[];
+  gpuSamples: number[];
+  peakMemoryMB: number;
+}
+
+/**
+ * Sample CPU, GPU, and memory usage during an async operation
+ * Returns samples for averaging and peak memory
+ */
+async function sampleResourcesDuring<T>(
+  pid: number,
+  operation: () => Promise<T>,
+  intervalMs: number = 200
+): Promise<{ result: T; samples: ResourceSamples }> {
+  const cpuSamples: number[] = [];
+  const gpuSamples: number[] = [];
+  let peakMemoryMB = 0;
+  let done = false;
+
+  // Start sampling in background
+  const sampler = (async () => {
+    while (!done) {
+      const cpu = getProcessCpuUsage(pid);
+      const mem = getProcessMemoryMB(pid);
+      const gpu = getGpuUtilization();
+      if (cpu > 0) cpuSamples.push(cpu);
+      gpuSamples.push(gpu);
+      if (mem > peakMemoryMB) peakMemoryMB = mem;
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+  })();
+
+  // Run the operation
+  const result = await operation();
+  done = true;
+
+  // Wait for sampler to finish
+  await sampler;
+
+  return { result, samples: { cpuSamples, gpuSamples, peakMemoryMB } };
+}
+
+/**
+ * Test a specific batch size and measure throughput + CPU usage + memory + energy efficiency
+ * Tests at least 5 batches OR 500 messages (whichever is larger) to get accurate measurements
  */
 async function testBatchSize(
   batchSize: number,
   sampleMessages: MessageRow[],
   port: number
 ): Promise<BenchmarkResult> {
-  const testCount = Math.min(batchSize * 3, sampleMessages.length); // Test 3 batches
+  // Test enough messages to get accurate throughput: at least 5 batches or 500 messages
+  const minMessages = Math.max(batchSize * 5, 500);
+  const testCount = Math.min(minMessages, sampleMessages.length);
   const testMessages = sampleMessages.slice(0, testCount);
 
+  const serverPid = getLlamaServerPid();
+  if (!serverPid) {
+    return {
+      batchSize,
+      throughput: 0,
+      cpuUsage: 0,
+      gpuUsage: 0,
+      memoryMB: 0,
+      energyProxy: 0,
+      efficiency: 0,
+      success: false,
+      error: 'llama-server not running',
+    };
+  }
+
   const startTime = Date.now();
-  const startCpu = process.cpuUsage();
 
   try {
-    for (let i = 0; i < testMessages.length; i += batchSize) {
-      const batch = testMessages.slice(i, i + batchSize);
-      const texts = batch.map((m) => {
-        const stripped = stripToolOutputs(m.content);
-        return truncateText(stripped);
-      });
-
-      await embedBatchViaServer(texts, port);
-    }
+    // Run embedding with resource sampling (CPU + GPU + memory)
+    const { samples } = await sampleResourcesDuring(serverPid, async () => {
+      for (let i = 0; i < testMessages.length; i += batchSize) {
+        const batch = testMessages.slice(i, i + batchSize);
+        const texts = batch.map((m) => {
+          const stripped = stripToolOutputs(m.content);
+          return truncateText(stripped);
+        });
+        await embedBatchViaServer(texts, port);
+      }
+    }, 100); // Sample every 100ms for more accuracy
 
     const elapsed = (Date.now() - startTime) / 1000;
-    const endCpu = process.cpuUsage(startCpu);
-    const cpuPercent = ((endCpu.user + endCpu.system) / 1000000) / elapsed * 100;
+
+    // Calculate average CPU usage from samples
+    const avgCpu = samples.cpuSamples.length > 0
+      ? samples.cpuSamples.reduce((a, b) => a + b, 0) / samples.cpuSamples.length
+      : 0;
+
+    // Calculate average GPU usage from samples
+    const avgGpu = samples.gpuSamples.length > 0
+      ? samples.gpuSamples.reduce((a, b) => a + b, 0) / samples.gpuSamples.length
+      : 0;
+
+    // Energy proxy: CPU-seconds (total CPU time consumed)
+    // Higher CPU% for longer = more energy used
+    const energyProxy = (avgCpu * elapsed) / 100;
+
+    // Efficiency: messages per CPU-second (higher = better)
+    // This tells us how much work we get per unit of energy
+    const efficiency = energyProxy > 0 ? testCount / energyProxy : 0;
 
     return {
       batchSize,
       throughput: testCount / elapsed,
-      cpuUsage: Math.round(cpuPercent * 10) / 10,
+      cpuUsage: Math.round(avgCpu * 10) / 10,
+      gpuUsage: Math.round(avgGpu),
+      memoryMB: Math.round(samples.peakMemoryMB),
+      energyProxy: Math.round(energyProxy * 100) / 100,
+      efficiency: Math.round(efficiency * 10) / 10,
       success: true,
     };
   } catch (error) {
@@ -508,6 +655,10 @@ async function testBatchSize(
       batchSize,
       throughput: 0,
       cpuUsage: 0,
+      gpuUsage: 0,
+      memoryMB: 0,
+      energyProxy: 0,
+      efficiency: 0,
       success: false,
       error: error instanceof Error ? error.message : String(error),
     };
@@ -528,11 +679,11 @@ async function runAutoBenchmark(): Promise<void> {
     console.log('');
   }
 
-  // Get sample messages
+  // Get sample messages (need at least 1000 for accurate benchmark across all batch sizes)
   const table = await getMessagesTable();
-  const allMessages = await withRetry(() => table.query().limit(200).toArray()) as MessageRow[];
+  const allMessages = await withRetry(() => table.query().limit(1000).toArray()) as MessageRow[];
 
-  if (allMessages.length < 20) {
+  if (allMessages.length < 500) {
     console.log('  Not enough messages to benchmark, using defaults');
     saveConfig(DEFAULT_CONFIG);
     return;
@@ -565,19 +716,33 @@ async function runAutoBenchmark(): Promise<void> {
     return;
   }
 
-  successfulResults.sort((a, b) => b.throughput - a.throughput);
-  const optimal = successfulResults[0]!;
+  // Sort by efficiency (best energy usage), but also consider throughput
+  const byEfficiency = [...successfulResults].sort((a, b) => b.efficiency - a.efficiency);
+  const byThroughput = [...successfulResults].sort((a, b) => b.throughput - a.throughput);
+
+  const fastest = byThroughput[0]!;
+  const mostEfficient = byEfficiency[0]!;
+
+  // Pick most efficient if it's within 20% of fastest, otherwise pick fastest
+  let optimal = fastest;
+  if (mostEfficient.batchSize !== fastest.batchSize) {
+    const speedRatio = mostEfficient.throughput / fastest.throughput;
+    if (speedRatio > 0.8) {
+      optimal = mostEfficient;
+    }
+  }
 
   const newConfig: EmbedConfig = {
     serverBatchSize: optimal.batchSize,
     maxTextChars: 2000,
-    batchDelayMs: 0, // No delay for max throughput
+    batchDelayMs: 0,
     benchmarkedAt: new Date().toISOString(),
     throughput: optimal.throughput,
+    efficiency: optimal.efficiency,
   };
 
   saveConfig(newConfig);
-  console.log(`  Optimal: batch size ${optimal.batchSize} (${optimal.throughput.toFixed(0)} msg/s)`);
+  console.log(`  Optimal: batch ${optimal.batchSize} (${optimal.throughput.toFixed(0)} msg/s, ${optimal.efficiency.toFixed(0)} msg/CPU-s)`);
 }
 
 /**
@@ -608,12 +773,12 @@ async function runBenchmark(): Promise<void> {
     console.log('\nllama-server downloaded.');
   }
 
-  // Get sample messages for testing
+  // Get sample messages for testing (need 1000 for accurate benchmark)
   const table = await getMessagesTable();
-  const allMessages = await withRetry(() => table.query().limit(200).toArray()) as MessageRow[];
+  const allMessages = await withRetry(() => table.query().limit(1000).toArray()) as MessageRow[];
 
-  if (allMessages.length < 50) {
-    console.log('Not enough messages to benchmark (need at least 50). Run sync first.');
+  if (allMessages.length < 500) {
+    console.log('Not enough messages to benchmark (need at least 500). Run sync first.');
     process.exit(1);
   }
 
@@ -624,26 +789,29 @@ async function runBenchmark(): Promise<void> {
   const port = await startLlamaServer(modelPath);
   console.log(`Server started on port ${port}\n`);
 
-  // Test different batch sizes (up to 256)
-  const batchSizes = [4, 8, 16, 32, 64, 128, 256];
+  // Test different batch sizes (up to 256 - diminishing returns beyond this)
+  const batchSizes = [8, 32, 64, 128, 256];
   const results: BenchmarkResult[] = [];
 
-  console.log('Batch Size | Throughput | CPU Usage | Status');
-  console.log('-----------|------------|-----------|-------');
+  console.log('Batch  | Throughput |  CPU %  |  GPU %  |  Memory  | Efficiency | Status');
+  console.log('-------|------------|---------|---------|----------|------------|-------');
 
   for (const batchSize of batchSizes) {
-    process.stdout.write(`    ${batchSize.toString().padEnd(6)} |`);
+    process.stdout.write(`  ${batchSize.toString().padEnd(4)} |`);
 
     const result = await testBatchSize(batchSize, allMessages, port);
     results.push(result);
 
     if (result.success) {
       console.log(
-        ` ${result.throughput.toFixed(1).padStart(7)} msg/s | ` +
-        `${result.cpuUsage.toFixed(1).padStart(6)}% | ✓`
+        ` ${result.throughput.toFixed(1).padStart(7)} msg/s |` +
+        ` ${result.cpuUsage.toFixed(0).padStart(5)}%  |` +
+        ` ${result.gpuUsage.toString().padStart(5)}%  |` +
+        ` ${result.memoryMB.toString().padStart(5)} MB |` +
+        ` ${result.efficiency.toFixed(0).padStart(7)} msg/CPU-s | ✓`
       );
     } else {
-      console.log(`     -     |     -     | ✗ (${result.error?.slice(0, 30)}...)`);
+      console.log(`     -      |    -    |    -    |     -    |      -     | ✗ ${result.error?.slice(0, 15)}`);
     }
 
     // Brief pause between tests
@@ -652,7 +820,7 @@ async function runBenchmark(): Promise<void> {
 
   await stopLlamaServer();
 
-  // Find optimal: highest throughput among successful results
+  // Find optimal: highest efficiency (throughput per CPU usage) among successful results
   const successfulResults = results.filter((r) => r.success);
 
   if (successfulResults.length === 0) {
@@ -660,32 +828,44 @@ async function runBenchmark(): Promise<void> {
     process.exit(1);
   }
 
-  // Sort by throughput (highest first)
-  successfulResults.sort((a, b) => b.throughput - a.throughput);
-  const optimal = successfulResults[0]!;
+  // Find best by different metrics
+  const byThroughput = [...successfulResults].sort((a, b) => b.throughput - a.throughput);
+  const byEfficiency = [...successfulResults].sort((a, b) => b.efficiency - a.efficiency);
 
-  // If CPU usage is very high (>80%), consider a smaller batch size
-  let recommended: BenchmarkResult = optimal;
-  if (optimal.cpuUsage > 80 && successfulResults.length > 1) {
-    const lowerCpuOption = successfulResults.find((r) => r.cpuUsage < 60);
-    if (lowerCpuOption && lowerCpuOption.throughput > optimal.throughput * 0.7) {
-      recommended = lowerCpuOption;
-      console.log(`\n⚡ Highest throughput: batch ${optimal.batchSize} (${optimal.throughput.toFixed(1)} msg/s, ${optimal.cpuUsage}% CPU)`);
-      console.log(`🌡️  Recommended for lower heat: batch ${recommended.batchSize} (${recommended.throughput.toFixed(1)} msg/s, ${recommended.cpuUsage}% CPU)`);
+  const fastest = byThroughput[0]!;
+  const mostEfficient = byEfficiency[0]!;
+
+  console.log('\n📊 Results:');
+  console.log(`   ⚡ Fastest: batch ${fastest.batchSize} (${fastest.throughput.toFixed(1)} msg/s, ${fastest.gpuUsage}% GPU)`);
+  console.log(`   🌱 Most efficient: batch ${mostEfficient.batchSize} (${mostEfficient.efficiency.toFixed(0)} msg/CPU-s, ${mostEfficient.gpuUsage}% GPU)`);
+
+  // Default to fastest, but recommend efficient if it's close in speed
+  let recommended = fastest;
+  if (mostEfficient.batchSize !== fastest.batchSize) {
+    const speedRatio = mostEfficient.throughput / fastest.throughput;
+    if (speedRatio > 0.8) {
+      // Most efficient is within 20% of fastest - recommend it
+      recommended = mostEfficient;
+      console.log(`\n   → Recommending most efficient (only ${((1 - speedRatio) * 100).toFixed(0)}% slower, uses less energy)`);
+    } else {
+      console.log(`\n   → Recommending fastest (efficiency option is ${((1 - speedRatio) * 100).toFixed(0)}% slower)`);
     }
   }
 
-  console.log(`\n✅ Optimal batch size: ${recommended.batchSize}`);
-  console.log(`   Throughput: ${recommended.throughput.toFixed(1)} messages/second`);
-  console.log(`   CPU usage: ${recommended.cpuUsage}%`);
+  console.log(`\n✅ Selected: batch size ${recommended.batchSize}`);
+  console.log(`   Throughput: ${recommended.throughput.toFixed(1)} msg/s`);
+  console.log(`   CPU: ${recommended.cpuUsage.toFixed(0)}%  GPU: ${recommended.gpuUsage}%`);
+  console.log(`   Memory: ${recommended.memoryMB} MB`);
+  console.log(`   Efficiency: ${recommended.efficiency.toFixed(0)} msg/CPU-second`);
 
   // Save config
   const newConfig: EmbedConfig = {
     serverBatchSize: recommended.batchSize,
-    maxTextChars: 2000, // Keep this fixed
-    batchDelayMs: 0, // No delay for max throughput
+    maxTextChars: 2000,
+    batchDelayMs: 0,
     benchmarkedAt: new Date().toISOString(),
     throughput: recommended.throughput,
+    efficiency: recommended.efficiency,
   };
 
   saveConfig(newConfig);

@@ -300,6 +300,13 @@ export async function stopLlamaServer(): Promise<void> {
   }
 }
 
+/**
+ * Get the PID of the running llama-server process (for CPU monitoring)
+ */
+export function getLlamaServerPid(): number | null {
+  return serverProcess?.pid ?? null;
+}
+
 async function waitForServer(port: number, maxWaitMs: number): Promise<boolean> {
   const startTime = Date.now();
   while (Date.now() - startTime < maxWaitMs) {
