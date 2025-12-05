@@ -115,9 +115,6 @@ program
 program
   .command('chat')
   .description('Start an AI chat session with dex tools (requires OpenCode)')
-  .option('-m, --model <model>', 'Model to use (e.g., anthropic/claude-sonnet)')
-  .option('-c, --continue', 'Continue the last session')
-  .option('-s, --session <id>', 'Continue a specific session')
   .action(chatCommand);
 
 // MCP server command

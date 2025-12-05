@@ -1,35 +1,24 @@
 /**
- * Chat command - launches OpenCode with dex MCP tools available
+ * Chat command - launches OpenCode TUI attached to a dex-managed server
  *
- * Ensures the dex MCP server is configured in OpenCode's config,
- * then spawns OpenCode TUI for an interactive chat session.
+ * Starts an OpenCode server with Claude Code credentials injected,
+ * then attaches the OpenCode TUI to it. This provides a unified
+ * authentication experience through dex.
  */
 
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
-
-interface OpenCodeConfig {
-  $schema?: string;
-  mcp?: Record<string, McpServerConfig>;
-  [key: string]: unknown;
-}
-
-interface McpServerConfig {
-  type: 'local' | 'remote';
-  command?: string[];
-  url?: string;
-  environment?: Record<string, string>;
-  headers?: Record<string, string>;
-  enabled?: boolean;
-  timeout?: number;
-}
+import {
+  startServer,
+  apiRequest,
+  type OpenCodeServerState,
+} from '../../providers/claude-code/client.js';
+import { getClaudeCodeCredentials } from '../../providers/claude-code/credentials.js';
+import { getOpencodeBinPath } from '../../utils/paths.js';
 
 // OpenCode config locations
-// Note: OpenCode ignores XDG_DATA_HOME for session storage, so we can't fully isolate
-// dex chat sessions. They'll appear alongside regular OpenCode sessions.
-const OPENCODE_CONFIG = path.join(homedir(), '.config', 'opencode', 'opencode.json');
 const OPENCODE_AGENT_DIR = path.join(homedir(), '.config', 'opencode', 'agent');
 
 const DEX_AGENT_PROMPT = `You are a coding assistant with access to the user's historical coding conversations via dex tools.
@@ -79,172 +68,76 @@ function ensureDexAgent(): void {
   fs.writeFileSync(agentPath, DEX_AGENT_MD);
 }
 
-function getDexCommand(): string[] {
-  // Check if dex is in PATH
-  try {
-    const which = execSync('which dex', { encoding: 'utf-8' }).trim();
-    if (which) {
-      return [which, 'serve'];
-    }
-  } catch {
-    // Not in PATH
-  }
-
-  // Check common global install locations
-  const globalLocations = [
-    path.join(homedir(), '.bun', 'bin', 'dex'),
-    path.join(homedir(), '.npm-global', 'bin', 'dex'),
-    '/usr/local/bin/dex',
-  ];
-
-  for (const location of globalLocations) {
-    if (fs.existsSync(location)) {
-      return [location, 'serve'];
-    }
-  }
-
-  // Fallback to just 'dex' and let the shell find it
-  return ['dex', 'serve'];
-}
-
-function ensureDexMcpConfig(): boolean {
-  const configDir = path.dirname(OPENCODE_CONFIG);
-
-  // Ensure config directory exists
-  if (!fs.existsSync(configDir)) {
-    fs.mkdirSync(configDir, { recursive: true });
-  }
-
-  let config: OpenCodeConfig = {};
-
-  // Read existing config if it exists
-  if (fs.existsSync(OPENCODE_CONFIG)) {
-    try {
-      const content = fs.readFileSync(OPENCODE_CONFIG, 'utf-8');
-      config = JSON.parse(content) as OpenCodeConfig;
-    } catch {
-      // Start fresh if config is invalid
-      config = {};
-    }
-  }
-
-  // Check if dex is already configured
-  if (config.mcp?.dex) {
-    return true;
-  }
-
-  // Add dex MCP configuration
-  const dexCommand = getDexCommand();
-
-  if (!config.mcp) {
-    config.mcp = {};
-  }
-
-  config.mcp.dex = {
-    type: 'local',
-    command: dexCommand,
-    enabled: true,
-    timeout: 10000,
-  };
-
-  // Write updated config
-  try {
-    fs.writeFileSync(OPENCODE_CONFIG, JSON.stringify(config, null, 2));
-    console.log('Added dex MCP server to OpenCode config');
-    return true;
-  } catch (err) {
-    console.error('Failed to write OpenCode config:', err);
-    return false;
-  }
-}
-
-function findOpenCode(): string | null {
-  // Check if opencode is in PATH
-  try {
-    const which = execSync('which opencode', { encoding: 'utf-8' }).trim();
-    if (which) {
-      return which;
-    }
-  } catch {
-    // Not in PATH
-  }
-
-  // Check common locations
-  const candidates = [
-    path.join(homedir(), '.opencode', 'bin', 'opencode'),
-    path.join(homedir(), '.local', 'share', 'opencode', 'bin', 'opencode'),
-  ];
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
-export interface ChatOptions {
-  model?: string;
-  continue?: boolean;
-  session?: string;
-}
-
-export async function chatCommand(options: ChatOptions = {}): Promise<void> {
-  // Ensure OpenCode is installed
-  const opencodePath = findOpenCode();
-  if (!opencodePath) {
-    console.error('OpenCode not found. Please install it first:');
-    console.error('  curl -fsSL https://opencode.ai/install.sh | bash');
+export async function chatCommand(): Promise<void> {
+  // Check for Claude Code credentials
+  const creds = getClaudeCodeCredentials();
+  if (!creds) {
+    console.error('No Claude Code credentials found.');
+    console.error('Please authenticate with Claude Code first:');
+    console.error('  claude login');
     process.exit(1);
   }
 
-  // Ensure dex MCP is configured
-  if (!ensureDexMcpConfig()) {
-    console.error('Failed to configure dex MCP server');
-    process.exit(1);
-  }
-
-  // Ensure dex agent is available for custom system prompt
+  // Ensure dex agent is available
   ensureDexAgent();
 
-  // Build OpenCode command arguments
-  const args: string[] = [];
+  console.log('Starting dex chat server...');
 
-  if (options.model) {
-    args.push('--model', options.model);
+  // Start OpenCode server
+  let serverState: OpenCodeServerState;
+  try {
+    serverState = await startServer();
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
   }
 
-  if (options.continue) {
-    args.push('--continue');
+  // Inject Claude Code credentials
+  try {
+    await apiRequest(serverState.url, '/auth/anthropic', 'PUT', {
+      type: 'oauth',
+      access: creds.accessToken,
+      refresh: creds.refreshToken,
+      expires: creds.expiresAt,
+    });
+  } catch (error) {
+    serverState.process.kill();
+    console.error('Failed to inject credentials:', error);
+    process.exit(1);
   }
 
-  if (options.session) {
-    args.push('--session', options.session);
-  }
+  console.log(`Server ready at ${serverState.url}`);
+  console.log('Attaching TUI...\n');
 
-  // Add current directory as project path
-  args.push(process.cwd());
+  // Build attach command arguments
+  // Note: attach only supports --dir, --print-logs, --log-level
+  // Agent selection happens through the dex.md file we created
+  const opencodePath = getOpencodeBinPath();
+  const args = ['attach', serverState.url];
 
-  // Use the dex agent for custom system prompt about dex tools
-  args.push('--agent', 'dex');
-
-  console.log('Starting OpenCode with dex tools...');
-  console.log('Available tools: dex_stats, dex_list, dex_search, dex_get\n');
-
-  // Spawn OpenCode TUI
+  // Spawn OpenCode TUI attached to our server
   const child = spawn(opencodePath, args, {
     stdio: 'inherit',
     env: process.env,
   });
 
-  // Handle exit
+  // Handle exit - clean up server
   child.on('close', (code) => {
+    serverState.process.kill();
     process.exit(code ?? 0);
   });
 
   child.on('error', (err) => {
-    console.error('Failed to start OpenCode:', err);
+    serverState.process.kill();
+    console.error('Failed to attach TUI:', err);
     process.exit(1);
   });
+
+  // Handle signals to clean up server
+  const cleanup = () => {
+    serverState.process.kill();
+    process.exit(0);
+  };
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
 }

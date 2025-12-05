@@ -24,7 +24,7 @@ export interface ClaudeCodeClient {
   close(): Promise<void>;
 }
 
-interface OpenCodeServerState {
+export interface OpenCodeServerState {
   process: ChildProcess;
   url: string;
   sessionId?: string;
@@ -33,7 +33,7 @@ interface OpenCodeServerState {
 /**
  * Wait for OpenCode server to be ready by polling the output
  */
-function waitForServer(proc: ChildProcess, timeout = 30000): Promise<string> {
+export function waitForServer(proc: ChildProcess, timeout = 30000): Promise<string> {
   return new Promise((resolve, reject) => {
     let output = '';
     const timer = setTimeout(() => {
@@ -72,7 +72,7 @@ function waitForServer(proc: ChildProcess, timeout = 30000): Promise<string> {
 /**
  * Start the OpenCode server with isolated data directory
  */
-async function startServer(): Promise<OpenCodeServerState> {
+export async function startServer(): Promise<OpenCodeServerState> {
   // Ensure the local OpenCode home directory exists
   if (!existsSync(DEX_OPENCODE_HOME)) {
     mkdirSync(DEX_OPENCODE_HOME, { recursive: true });
@@ -103,7 +103,7 @@ async function startServer(): Promise<OpenCodeServerState> {
 /**
  * Make an API request to the OpenCode server
  */
-async function apiRequest<T>(
+export async function apiRequest<T>(
   baseUrl: string,
   path: string,
   method: 'GET' | 'POST' | 'PUT' = 'GET',
