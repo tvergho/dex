@@ -859,7 +859,7 @@ function UnifiedApp() {
   // Load conversations when entering list view (DB should already be ready from goToList)
   useEffect(() => {
     if (unifiedViewMode === 'list' && dbReady && conversations.length === 0 && !searchResults) {
-      conversationRepo.list({}).then(setConversations);
+      conversationRepo.list({}).then(({ conversations: convs }) => setConversations(convs));
     }
   }, [unifiedViewMode, dbReady, conversations.length, searchResults]);
 
@@ -1001,7 +1001,7 @@ function UnifiedApp() {
         setSearchResults(results);
       } else if (source || model) {
         // Filter-only query (no text search)
-        const convs = await conversationRepo.list({ source, model });
+        const { conversations: convs } = await conversationRepo.list({ source, model });
         setConversations(convs);
         setSearchResults(null); // Clear search results to show filtered list
       }

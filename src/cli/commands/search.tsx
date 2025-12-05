@@ -43,6 +43,11 @@ interface SearchOptions {
   file?: string;
   source?: string;
   model?: string;
+  project?: string;
+  from?: string;
+  to?: string;
+  offset?: string;
+  json?: boolean;
 }
 
 function SearchApp({
@@ -544,6 +549,175 @@ function SearchApp({
   );
 }
 
+// --- JSON Output for MCP/Agent Use ---
+
+interface SearchJsonOutput {
+  results: Array<{
+    id: string;
+    title: string;
+    project: string;
+    source: string;
+    date: string;
+    snippet: string;
+    message_index: number;
+    estimated_tokens: number;
+  }>;
+  total: number;
+}
+
+async function printJsonSearch(options: {
+  query: string;
+  limit: number;
+  offset: number;
+  filePattern?: string;
+  sourceFilter?: string;
+  modelFilter?: string;
+  projectFilter?: string;
+  fromDate?: string;
+  toDate?: string;
+}): Promise<void> {
+  const { query, limit, offset, filePattern, sourceFilter, modelFilter, projectFilter, fromDate, toDate } = options;
+  await connect();
+
+  type SearchResult = {
+    conversation: Conversation;
+    totalMatches: number;
+    snippet: string;
+    messageIndex: number;
+  };
+
+  let allResults: SearchResult[] = [];
+  let total = 0;
+
+  // Helper to filter results
+  const applyFilters = (items: SearchResult[]): SearchResult[] => {
+    let filtered = items;
+    if (sourceFilter) {
+      filtered = filtered.filter((r) => r.conversation.source === sourceFilter);
+    }
+    if (modelFilter) {
+      const modelLower = modelFilter.toLowerCase();
+      filtered = filtered.filter((r) =>
+        r.conversation.model?.toLowerCase().includes(modelLower)
+      );
+    }
+    if (projectFilter) {
+      const projectLower = projectFilter.toLowerCase();
+      filtered = filtered.filter((r) => {
+        const workspacePath = (r.conversation.workspacePath || '').toLowerCase();
+        const projectName = (r.conversation.projectName || '').toLowerCase();
+        return workspacePath.includes(projectLower) || projectName.includes(projectLower);
+      });
+    }
+    if (fromDate) {
+      const from = new Date(fromDate).getTime();
+      filtered = filtered.filter((r) => {
+        const created = r.conversation.createdAt;
+        return created && new Date(created).getTime() >= from;
+      });
+    }
+    if (toDate) {
+      const to = new Date(toDate).getTime() + 86400000;
+      filtered = filtered.filter((r) => {
+        const created = r.conversation.createdAt;
+        return created && new Date(created).getTime() < to;
+      });
+    }
+    return filtered;
+  };
+
+  if (filePattern && !query) {
+    const fileResults = await searchByFilePath(filePattern, limit + offset + 100);
+    const convIdToMatches = new Map<string, FileSearchMatch[]>();
+    for (const match of fileResults) {
+      const existing = convIdToMatches.get(match.conversationId) ?? [];
+      existing.push(match);
+      convIdToMatches.set(match.conversationId, existing);
+    }
+
+    const conversations = await Promise.all(
+      Array.from(convIdToMatches.keys()).map((id) => conversationRepo.findById(id))
+    );
+
+    allResults = applyFilters(conversations
+      .filter((conv): conv is NonNullable<typeof conv> => conv !== null)
+      .map((conv) => {
+        const matches = convIdToMatches.get(conv.id) ?? [];
+        return {
+          conversation: conv,
+          totalMatches: matches.length,
+          snippet: matches.slice(0, 3).map((m) => m.filePath.split('/').pop()).join(', '),
+          messageIndex: 0,
+        };
+      }));
+  } else if (filePattern && query) {
+    const result = await search(query, limit + offset + 100);
+    const convIds = new Set(result.results.map((r) => r.conversation.id));
+    const fileMatchMap = await getFileMatchesForConversations(convIds, filePattern);
+
+    allResults = applyFilters(result.results
+      .filter((r) => (fileMatchMap.get(r.conversation.id) ?? []).length > 0)
+      .map((r) => ({
+        conversation: r.conversation,
+        totalMatches: r.totalMatches,
+        snippet: r.bestMatch.snippet,
+        messageIndex: r.bestMatch.messageIndex,
+      })));
+  } else if (!query && (sourceFilter || modelFilter || projectFilter)) {
+    const { conversations: convs, total: totalConvs } = await conversationRepo.list({
+      source: sourceFilter,
+      model: modelFilter,
+      project: projectFilter,
+      fromDate,
+      toDate,
+      limit: limit + offset,
+    });
+    allResults = convs.map((conv) => ({
+      conversation: conv,
+      totalMatches: 0,
+      snippet: conv.subtitle || '',
+      messageIndex: 0,
+    }));
+    total = totalConvs;
+  } else {
+    const result = await search(query, limit + offset + 100);
+    allResults = applyFilters(result.results.map((r) => ({
+      conversation: r.conversation,
+      totalMatches: r.totalMatches,
+      snippet: r.bestMatch.snippet,
+      messageIndex: r.bestMatch.messageIndex,
+    })));
+  }
+
+  // If total wasn't set from filter-only query, use allResults length
+  if (total === 0) {
+    total = allResults.length;
+  }
+
+  // Apply pagination
+  const paginatedResults = allResults.slice(offset, offset + limit);
+
+  const output: SearchJsonOutput = {
+    results: paginatedResults.map((r) => ({
+      id: r.conversation.id,
+      title: r.conversation.title,
+      project: r.conversation.workspacePath || r.conversation.projectName || '',
+      source: r.conversation.source,
+      date: r.conversation.createdAt || r.conversation.updatedAt || '',
+      snippet: r.snippet.slice(0, 300),
+      message_index: r.messageIndex,
+      estimated_tokens:
+        (r.conversation.totalInputTokens || 0) +
+        (r.conversation.totalOutputTokens || 0) +
+        (r.conversation.totalCacheCreationTokens || 0) +
+        (r.conversation.totalCacheReadTokens || 0),
+    })),
+    total,
+  };
+
+  console.log(JSON.stringify(output, null, 2));
+}
+
 async function plainSearch(
   query: string,
   limit: number,
@@ -615,7 +789,7 @@ async function plainSearch(
     totalMessages = result.totalMessages;
   } else if (sourceFilter || modelFilter) {
     // Filter-only query (no text search)
-    const convs = await conversationRepo.list({ source: sourceFilter, model: modelFilter, limit });
+    const { conversations: convs } = await conversationRepo.list({ source: sourceFilter, model: modelFilter, limit });
     results = convs.map((conv) => ({
       conversation: conv,
       totalMatches: 0,
@@ -701,13 +875,30 @@ async function plainSearch(
 
 export async function searchCommand(query: string, options: SearchOptions): Promise<void> {
   const limit = parseInt(options.limit ?? '20', 10);
+  const offset = parseInt(options.offset ?? '0', 10);
   const filePattern = options.file;
   const sourceFilter = options.source;
   const modelFilter = options.model;
+  const projectFilter = options.project;
 
-  if (!query && !filePattern && !sourceFilter && !modelFilter) {
+  if (!query && !filePattern && !sourceFilter && !modelFilter && !projectFilter) {
     console.error('Error: Please provide a search query, --file pattern, or filter options');
     process.exit(1);
+  }
+
+  if (options.json) {
+    await printJsonSearch({
+      query,
+      limit,
+      offset,
+      filePattern,
+      sourceFilter,
+      modelFilter,
+      projectFilter,
+      fromDate: options.from,
+      toDate: options.to,
+    });
+    return;
   }
 
   if (!process.stdin.isTTY) {

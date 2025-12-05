@@ -62,6 +62,7 @@ import { Source, type Conversation, type ConversationFile, type MessageFile } fr
 interface StatsOptions {
   period?: string;
   summary?: boolean;
+  json?: boolean;
 }
 
 type TabId = 'overview' | 'tokens' | 'activity' | 'projects' | 'files';
@@ -1748,6 +1749,82 @@ async function printSummary(period: number): Promise<void> {
   console.log('');
 }
 
+// --- JSON Output for MCP/Agent Use ---
+
+interface StatsJsonOutput {
+  total_conversations: number;
+  total_messages: number;
+  date_range: { earliest: string; latest: string };
+  sources: Record<string, number>;
+  projects: string[];
+  avg_tokens_per_conversation: number;
+  period_days: number;
+  totals: {
+    input_tokens: number;
+    output_tokens: number;
+    lines_added: number;
+    lines_removed: number;
+  };
+  streak: {
+    current: number;
+    longest: number;
+  };
+}
+
+async function printJsonStats(period: number): Promise<void> {
+  await connect();
+  const periodFilter = createPeriodFilter(period);
+
+  const [overview, sources, streak, projectStats, daily] = await Promise.all([
+    getOverviewStats(periodFilter),
+    getStatsBySource(periodFilter),
+    getStreakInfo(),
+    getProjectStats(periodFilter),
+    getDailyActivity(periodFilter),
+  ]);
+
+  // Calculate date range from daily activity
+  const dates = daily.map(d => d.date).sort();
+  const earliest = dates[0] || '';
+  const latest = dates[dates.length - 1] || '';
+
+  // Build sources record
+  const sourcesRecord: Record<string, number> = {};
+  for (const s of sources) {
+    sourcesRecord[s.source] = s.conversations;
+  }
+
+  // Get top 20 projects by activity
+  const topProjects = projectStats.slice(0, 20).map(p => p.projectName);
+
+  // Calculate avg tokens per conversation
+  const avgTokens = overview.conversations > 0
+    ? Math.round((overview.totalInputTokens + overview.totalOutputTokens) / overview.conversations)
+    : 0;
+
+  const output: StatsJsonOutput = {
+    total_conversations: overview.conversations,
+    total_messages: overview.messages,
+    date_range: { earliest, latest },
+    sources: sourcesRecord,
+    projects: topProjects,
+    avg_tokens_per_conversation: avgTokens,
+    period_days: period,
+    totals: {
+      input_tokens: overview.totalInputTokens,
+      output_tokens: overview.totalOutputTokens,
+      lines_added: overview.totalLinesAdded,
+      lines_removed: overview.totalLinesRemoved,
+    },
+    streak: {
+      current: streak.current,
+      longest: streak.longest,
+    },
+  };
+
+  console.log(JSON.stringify(output, null, 2));
+}
+
 // --- Rich Summary for Post-Sync ---
 
 export async function printRichSummary(period: number = 7): Promise<void> {
@@ -1785,6 +1862,11 @@ export async function printRichSummary(period: number = 7): Promise<void> {
 
 export async function statsCommand(options: StatsOptions): Promise<void> {
   const period = parseInt(options.period ?? '30', 10);
+
+  if (options.json) {
+    await printJsonStats(period);
+    return;
+  }
 
   if (options.summary || !process.stdin.isTTY) {
     await printSummary(period);

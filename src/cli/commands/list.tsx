@@ -32,6 +32,11 @@ import {
 interface ListOptions {
   limit?: string;
   source?: string;
+  project?: string;
+  from?: string;
+  to?: string;
+  offset?: string;
+  json?: boolean;
 }
 
 function ConversationRow({
@@ -152,7 +157,7 @@ function ListApp({
     async function loadConversations() {
       try {
         await connect();
-        const results = await conversationRepo.list({ limit, source });
+        const { conversations: results } = await conversationRepo.list({ limit, source });
         setConversations(results);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -423,7 +428,7 @@ function ListApp({
 
 async function plainList(limit: number, source?: string): Promise<void> {
   await connect();
-  const conversations = await conversationRepo.list({ limit, source });
+  const { conversations } = await conversationRepo.list({ limit, source });
 
   console.log(`\nConversations (${conversations.length}):\n`);
 
@@ -455,8 +460,74 @@ async function plainList(limit: number, source?: string): Promise<void> {
   }
 }
 
+// --- JSON Output for MCP/Agent Use ---
+
+interface ListJsonOutput {
+  conversations: Array<{
+    id: string;
+    title: string;
+    project: string;
+    source: string;
+    date: string;
+    message_count: number;
+    estimated_tokens: number;
+  }>;
+  total: number;
+}
+
+async function printJsonList(options: {
+  limit: number;
+  offset: number;
+  source?: string;
+  project?: string;
+  fromDate?: string;
+  toDate?: string;
+}): Promise<void> {
+  await connect();
+  const { conversations, total } = await conversationRepo.list({
+    limit: options.limit,
+    offset: options.offset,
+    source: options.source,
+    project: options.project,
+    fromDate: options.fromDate,
+    toDate: options.toDate,
+  });
+
+  const output: ListJsonOutput = {
+    conversations: conversations.map((conv) => ({
+      id: conv.id,
+      title: conv.title,
+      project: conv.workspacePath || conv.projectName || '',
+      source: conv.source,
+      date: conv.createdAt || conv.updatedAt || '',
+      message_count: conv.messageCount,
+      estimated_tokens:
+        (conv.totalInputTokens || 0) +
+        (conv.totalOutputTokens || 0) +
+        (conv.totalCacheCreationTokens || 0) +
+        (conv.totalCacheReadTokens || 0),
+    })),
+    total,
+  };
+
+  console.log(JSON.stringify(output, null, 2));
+}
+
 export async function listCommand(options: ListOptions): Promise<void> {
   const limit = parseInt(options.limit ?? '20', 10);
+  const offset = parseInt(options.offset ?? '0', 10);
+
+  if (options.json) {
+    await printJsonList({
+      limit,
+      offset,
+      source: options.source,
+      project: options.project,
+      fromDate: options.from,
+      toDate: options.to,
+    });
+    return;
+  }
 
   if (!process.stdin.isTTY) {
     await plainList(limit, options.source);

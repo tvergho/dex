@@ -268,7 +268,10 @@ export const conversationRepo = {
     offset?: number;
     source?: string;
     model?: string;
-  } = {}): Promise<Conversation[]> {
+    project?: string;
+    fromDate?: string;
+    toDate?: string;
+  } = {}): Promise<{ conversations: Conversation[]; total: number }> {
     return withRetry(async () => {
       const table = await getConversationsTable();
 
@@ -287,6 +290,28 @@ export const conversationRepo = {
           return model.toLowerCase().includes(modelLower);
         });
       }
+      if (opts.project) {
+        const projectLower = opts.project.toLowerCase();
+        filtered = filtered.filter((row) => {
+          const workspacePath = ((row.workspace_path as string) || '').toLowerCase();
+          const projectName = ((row.project_name as string) || '').toLowerCase();
+          return workspacePath.includes(projectLower) || projectName.includes(projectLower);
+        });
+      }
+      if (opts.fromDate) {
+        const from = new Date(opts.fromDate).getTime();
+        filtered = filtered.filter((row) => {
+          const created = row.created_at as string;
+          return created && new Date(created).getTime() >= from;
+        });
+      }
+      if (opts.toDate) {
+        const to = new Date(opts.toDate).getTime() + 86400000; // Include end date
+        filtered = filtered.filter((row) => {
+          const created = row.created_at as string;
+          return created && new Date(created).getTime() < to;
+        });
+      }
 
       // Sort by updated_at descending (most recent first)
       filtered.sort((a, b) => {
@@ -295,10 +320,16 @@ export const conversationRepo = {
         return bDate.localeCompare(aDate);
       });
 
-      // Apply limit after sorting (no limit by default)
-      const limited = opts.limit ? filtered.slice(0, opts.limit) : filtered;
+      // Save total before pagination
+      const total = filtered.length;
 
-      return limited.map((row) => ({
+      // Apply offset and limit after sorting
+      const offset = opts.offset || 0;
+      const limited = opts.limit
+        ? filtered.slice(offset, offset + opts.limit)
+        : filtered.slice(offset);
+
+      const conversations = limited.map((row) => ({
         id: row.id as string,
         source: row.source as Conversation['source'],
         title: row.title as string,
@@ -318,6 +349,7 @@ export const conversationRepo = {
         totalLinesAdded: (row.total_lines_added as number) || undefined,
         totalLinesRemoved: (row.total_lines_removed as number) || undefined,
       }));
+      return { conversations, total };
     });
   },
 

@@ -1,6 +1,6 @@
 {
   "name": "agentdex",
-  "version": "0.2.2",
+  "version": "0.3.1",
   "description": "Local search engine for AI coding agent conversations (Cursor, Claude Code, Codex, OpenCode)",
   "type": "module",
   "license": "MIT",
@@ -50,6 +50,7 @@
   },
   "dependencies": {
     "@lancedb/lancedb": "0.22.3",
+    "@modelcontextprotocol/sdk": "1.24.3",
     "@openauthjs/openauth": "0.4.3",
     "@opencode-ai/sdk": "1.0.123",
     "apache-arrow": "18.1.0",

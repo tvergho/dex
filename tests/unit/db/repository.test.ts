@@ -105,8 +105,9 @@ describe('conversationRepo', () => {
   describe('list', () => {
     it('returns empty array for empty database', async () => {
       const { conversationRepo } = await import('../../../src/db/repository');
-      const results = await conversationRepo.list();
-      expect(results).toEqual([]);
+      const { conversations, total } = await conversationRepo.list();
+      expect(conversations).toEqual([]);
+      expect(total).toBe(0);
     });
 
     it('returns conversations sorted by updatedAt descending', async () => {
@@ -116,12 +117,13 @@ describe('conversationRepo', () => {
       await db.seed({ conversations: [conv1, conv2, conv3] });
 
       const { conversationRepo } = await import('../../../src/db/repository');
-      const results = await conversationRepo.list();
+      const { conversations, total } = await conversationRepo.list();
 
-      expect(results.length).toBe(3);
-      expect(results[0]!.title).toBe('New');
-      expect(results[1]!.title).toBe('Middle');
-      expect(results[2]!.title).toBe('Old');
+      expect(conversations.length).toBe(3);
+      expect(total).toBe(3);
+      expect(conversations[0]!.title).toBe('New');
+      expect(conversations[1]!.title).toBe('Middle');
+      expect(conversations[2]!.title).toBe('Old');
     });
 
     it('filters by source', async () => {
@@ -130,10 +132,11 @@ describe('conversationRepo', () => {
       await db.seed({ conversations: [cursor, claude] });
 
       const { conversationRepo } = await import('../../../src/db/repository');
-      const results = await conversationRepo.list({ source: 'cursor' });
+      const { conversations, total } = await conversationRepo.list({ source: 'cursor' });
 
-      expect(results.length).toBe(1);
-      expect(results[0]!.title).toBe('Cursor');
+      expect(conversations.length).toBe(1);
+      expect(total).toBe(1);
+      expect(conversations[0]!.title).toBe('Cursor');
     });
 
     it('respects limit', async () => {
@@ -143,9 +146,10 @@ describe('conversationRepo', () => {
       await db.seed({ conversations: convs });
 
       const { conversationRepo } = await import('../../../src/db/repository');
-      const results = await conversationRepo.list({ limit: 3 });
+      const { conversations, total } = await conversationRepo.list({ limit: 3 });
 
-      expect(results.length).toBe(3);
+      expect(conversations.length).toBe(3);
+      expect(total).toBe(10); // total should be all matching, not just limited
     });
   });
 
@@ -199,7 +203,7 @@ describe('conversationRepo', () => {
       const { conversationRepo } = await import('../../../src/db/repository');
       await conversationRepo.deleteBySource('cursor');
 
-      const remaining = await conversationRepo.list();
+      const { conversations: remaining } = await conversationRepo.list();
       expect(remaining.length).toBe(1);
       expect(remaining[0]!.source).toBe('claude-code');
     });
@@ -212,7 +216,7 @@ describe('conversationRepo', () => {
       const { conversationRepo } = await import('../../../src/db/repository');
       await conversationRepo.deleteBySource('cursor', '/project1');
 
-      const remaining = await conversationRepo.list();
+      const { conversations: remaining } = await conversationRepo.list();
       expect(remaining.length).toBe(1);
       expect(remaining[0]!.workspacePath).toBe('/project2');
     });
@@ -586,6 +590,7 @@ describe('fileEditsRepo', () => {
     });
   });
 });
+
 
 
 
