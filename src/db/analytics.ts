@@ -2,7 +2,8 @@
  * Analytics query functions for the stats dashboard
  */
 
-import { connect, getConversationsTable, getFilesTable, getFileEditsTable } from './index';
+import { connect, getConversationsTable, getFilesTable, getFileEditsTable, withRetry, isTransientError } from './index';
+import type { Table } from '@lancedb/lancedb';
 import { Source, type Conversation } from '../schema/index';
 
 // --- Types ---
@@ -128,12 +129,27 @@ export function createPeriodFilter(days: number): PeriodFilter {
   return { startDate, endDate };
 }
 
+// --- Query Helper ---
+
+/**
+ * Execute a table query with retry logic for transient LanceDB errors.
+ * Handles stale table references that occur during/after sync operations.
+ */
+async function queryTableWithRetry<T>(
+  getTable: () => Promise<Table>,
+  query: (table: Table) => Promise<T>
+): Promise<T> {
+  return withRetry(async () => {
+    const table = await getTable();
+    return query(table);
+  });
+}
+
 // --- Query Functions ---
 
 export async function getOverviewStats(period: PeriodFilter): Promise<OverviewStats> {
   await connect();
-  const table = await getConversationsTable();
-  const rows = await table.query().toArray();
+  const rows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
 
   const filtered = rows.filter(r => isInPeriod(r.created_at as string, period));
 
@@ -165,8 +181,7 @@ export async function getOverviewStats(period: PeriodFilter): Promise<OverviewSt
 
 export async function getDailyActivity(period: PeriodFilter): Promise<DayActivity[]> {
   await connect();
-  const table = await getConversationsTable();
-  const rows = await table.query().toArray();
+  const rows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
 
   const filtered = rows.filter(r => isInPeriod(r.created_at as string, period));
 
@@ -204,8 +219,7 @@ export async function getDailyActivity(period: PeriodFilter): Promise<DayActivit
 
 export async function getStatsBySource(period: PeriodFilter): Promise<SourceStats[]> {
   await connect();
-  const table = await getConversationsTable();
-  const rows = await table.query().toArray();
+  const rows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
 
   const filtered = rows.filter(r => isInPeriod(r.created_at as string, period));
 
@@ -235,8 +249,7 @@ export async function getStatsBySource(period: PeriodFilter): Promise<SourceStat
 
 export async function getStatsByModel(period: PeriodFilter): Promise<ModelStats[]> {
   await connect();
-  const table = await getConversationsTable();
-  const rows = await table.query().toArray();
+  const rows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
 
   const filtered = rows.filter(r => isInPeriod(r.created_at as string, period));
 
@@ -275,8 +288,7 @@ export async function getTopConversationsByTokens(
   limit: number = 5
 ): Promise<Conversation[]> {
   await connect();
-  const table = await getConversationsTable();
-  const rows = await table.query().toArray();
+  const rows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
 
   const filtered = rows.filter(r => isInPeriod(r.created_at as string, period));
 
@@ -297,8 +309,7 @@ export async function getLinesGeneratedStats(
   limit: number = 5
 ): Promise<LinesGeneratedStats> {
   await connect();
-  const table = await getConversationsTable();
-  const rows = await table.query().toArray();
+  const rows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
 
   const filtered = rows.filter(r => isInPeriod(r.created_at as string, period));
 
@@ -332,8 +343,7 @@ export async function getLinesGeneratedStats(
 
 export async function getCacheStats(period: PeriodFilter): Promise<CacheStats> {
   await connect();
-  const table = await getConversationsTable();
-  const rows = await table.query().toArray();
+  const rows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
 
   // Only include Claude Code and Codex sources (which have cache data)
   const filtered = rows.filter(
@@ -368,8 +378,7 @@ export async function getCacheStats(period: PeriodFilter): Promise<CacheStats> {
 
 export async function getActivityByHour(period: PeriodFilter): Promise<number[]> {
   await connect();
-  const table = await getConversationsTable();
-  const rows = await table.query().toArray();
+  const rows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
 
   const filtered = rows.filter(r => isInPeriod(r.created_at as string, period));
 
@@ -388,8 +397,7 @@ export async function getActivityByHour(period: PeriodFilter): Promise<number[]>
 
 export async function getActivityByDayOfWeek(period: PeriodFilter): Promise<number[]> {
   await connect();
-  const table = await getConversationsTable();
-  const rows = await table.query().toArray();
+  const rows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
 
   const filtered = rows.filter(r => isInPeriod(r.created_at as string, period));
 
@@ -408,8 +416,7 @@ export async function getActivityByDayOfWeek(period: PeriodFilter): Promise<numb
 
 export async function getStreakInfo(): Promise<StreakInfo> {
   await connect();
-  const table = await getConversationsTable();
-  const rows = await table.query().toArray();
+  const rows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
 
   // Get all unique dates with activity
   const datesSet = new Set<string>();
@@ -543,12 +550,10 @@ function resolveProjectName(
 
 export async function getProjectStats(period: PeriodFilter): Promise<ProjectStats[]> {
   await connect();
-  const table = await getConversationsTable();
-  const rows = await table.query().toArray();
+  const rows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
 
   // Load file edits for project inference
-  const editsTable = await getFileEditsTable();
-  const allEdits = await editsTable.query().toArray();
+  const allEdits = await queryTableWithRetry(getFileEditsTable, table => table.query().toArray());
 
   // Group edits by conversation ID
   const editsByConvId = new Map<string, Array<{ file_path: string }>>();
@@ -606,12 +611,10 @@ export async function getConversationsByProject(
   period: PeriodFilter
 ): Promise<Conversation[]> {
   await connect();
-  const table = await getConversationsTable();
-  const rows = await table.query().toArray();
+  const rows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
 
   // Load file edits for project inference
-  const editsTable = await getFileEditsTable();
-  const allEdits = await editsTable.query().toArray();
+  const allEdits = await queryTableWithRetry(getFileEditsTable, table => table.query().toArray());
 
   // Group edits by conversation ID
   const editsByConvId = new Map<string, Array<{ file_path: string }>>();
@@ -789,14 +792,9 @@ export async function getCombinedFileStats(
   limit: number = 10
 ): Promise<FileStats[]> {
   await connect();
-  const [conversationsTable, filesTable, fileEditsTable] = await Promise.all([
-    getConversationsTable(),
-    getFilesTable(),
-    getFileEditsTable(),
-  ]);
 
   // Get conversations in period to filter files
-  const convRows = await conversationsTable.query().toArray();
+  const convRows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
   const convsInPeriod = convRows.filter(r => isInPeriod(r.created_at as string, period));
   const convInPeriodSet = new Set(convsInPeriod.map(r => r.id as string));
 
@@ -811,7 +809,7 @@ export async function getCombinedFileStats(
   }
 
   // Aggregate file edits
-  const editsRows = await fileEditsTable.query().toArray();
+  const editsRows = await queryTableWithRetry(getFileEditsTable, table => table.query().toArray());
   const editsByFile = new Map<string, { editCount: number; linesAdded: number; linesRemoved: number; conversations: Set<string> }>();
 
   for (const edit of editsRows) {
@@ -835,7 +833,7 @@ export async function getCombinedFileStats(
   }
 
   // Aggregate file mentions (from conversation_files)
-  const filesRows = await filesTable.query().toArray();
+  const filesRows = await queryTableWithRetry(getFilesTable, table => table.query().toArray());
   const mentionsByFile = new Map<string, { mentionCount: number; conversations: Set<string> }>();
 
   for (const file of filesRows) {
@@ -889,20 +887,16 @@ export async function getCombinedFileStats(
 
 export async function getEditTypeBreakdown(period: PeriodFilter): Promise<EditTypeBreakdown> {
   await connect();
-  const [conversationsTable, fileEditsTable] = await Promise.all([
-    getConversationsTable(),
-    getFileEditsTable(),
-  ]);
 
   // Get conversations in period
-  const convRows = await conversationsTable.query().toArray();
+  const convRows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
   const convInPeriod = new Set(
     convRows
       .filter(r => isInPeriod(r.created_at as string, period))
       .map(r => r.id as string)
   );
 
-  const editsRows = await fileEditsTable.query().toArray();
+  const editsRows = await queryTableWithRetry(getFileEditsTable, table => table.query().toArray());
 
   let create = 0;
   let modify = 0;
@@ -925,20 +919,16 @@ export async function getFileTypeStats(
   limit: number = 5
 ): Promise<FileTypeStats[]> {
   await connect();
-  const [conversationsTable, fileEditsTable] = await Promise.all([
-    getConversationsTable(),
-    getFileEditsTable(),
-  ]);
 
   // Get conversations in period
-  const convRows = await conversationsTable.query().toArray();
+  const convRows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
   const convInPeriod = new Set(
     convRows
       .filter(r => isInPeriod(r.created_at as string, period))
       .map(r => r.id as string)
   );
 
-  const editsRows = await fileEditsTable.query().toArray();
+  const editsRows = await queryTableWithRetry(getFileEditsTable, table => table.query().toArray());
   const byExtension = new Map<string, FileTypeStats>();
 
   for (const edit of editsRows) {
@@ -1015,8 +1005,7 @@ export async function getRecentConversations(
   limit: number = 5
 ): Promise<RecentConversation[]> {
   await connect();
-  const table = await getConversationsTable();
-  const rows = await table.query().toArray();
+  const rows = await queryTableWithRetry(getConversationsTable, table => table.query().toArray());
 
   const filtered = rows.filter(r => isInPeriod(r.created_at as string, period));
 
