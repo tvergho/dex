@@ -182,6 +182,7 @@ export async function startMcpServer(): Promise<void> {
         totalMatches: number;
         snippet: string;
         messageIndex: number;
+        adjacentContext?: { role: 'user' | 'assistant' | 'system'; snippet: string; messageIndex: number };
       };
 
       let allResults: SearchResult[] = [];
@@ -253,6 +254,7 @@ export async function startMcpServer(): Promise<void> {
             totalMatches: r.totalMatches,
             snippet: r.bestMatch.snippet,
             messageIndex: r.bestMatch.messageIndex,
+            adjacentContext: r.bestMatch.adjacentContext,
           })));
       } else {
         const result = await search(query, limit + offset + 100);
@@ -261,6 +263,7 @@ export async function startMcpServer(): Promise<void> {
           totalMatches: r.totalMatches,
           snippet: r.bestMatch.snippet,
           messageIndex: r.bestMatch.messageIndex,
+          adjacentContext: r.bestMatch.adjacentContext,
         })));
       }
 
@@ -276,6 +279,12 @@ export async function startMcpServer(): Promise<void> {
           date: r.conversation.createdAt || r.conversation.updatedAt || '',
           snippet: r.snippet.slice(0, 300),
           message_index: r.messageIndex,
+          // Adjacent context shows the other side of the conversation (e.g., assistant response after user query)
+          adjacent_context: r.adjacentContext ? {
+            role: r.adjacentContext.role,
+            snippet: r.adjacentContext.snippet.slice(0, 300),
+            message_index: r.adjacentContext.messageIndex,
+          } : undefined,
           estimated_tokens:
             (r.conversation.totalInputTokens || 0) +
             (r.conversation.totalOutputTokens || 0) +

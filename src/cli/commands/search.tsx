@@ -728,7 +728,12 @@ async function plainSearch(
   await connect();
   const startTime = Date.now();
 
-  type PlainResult = { conversation: { id: string; title: string; source: string; model?: string; workspacePath?: string; updatedAt?: string }; totalMatches: number; snippet: string };
+  type PlainResult = {
+    conversation: { id: string; title: string; source: string; model?: string; workspacePath?: string; updatedAt?: string };
+    totalMatches: number;
+    snippet: string;
+    adjacentContext?: { role: 'user' | 'assistant' | 'system'; snippet: string };
+  };
   let results: PlainResult[] = [];
   let totalConversations = 0;
   let totalMessages = 0;
@@ -784,6 +789,7 @@ async function plainSearch(
         conversation: r.conversation,
         totalMatches: r.totalMatches,
         snippet: r.bestMatch.snippet,
+        adjacentContext: r.bestMatch.adjacentContext,
       })));
     totalConversations = results.length;
     totalMessages = result.totalMessages;
@@ -802,6 +808,7 @@ async function plainSearch(
       conversation: r.conversation,
       totalMatches: r.totalMatches,
       snippet: r.bestMatch.snippet,
+      adjacentContext: r.bestMatch.adjacentContext,
     })));
     totalConversations = results.length;
     totalMessages = result.totalMessages;
@@ -868,6 +875,15 @@ async function plainSearch(
       snippetText = snippetContent.slice(0, maxWidth - 3) + '...';
     }
     console.log(`   "${snippetText}"`);
+    // Show adjacent context (e.g., assistant response after a user query)
+    if (r.adjacentContext) {
+      const prefix = r.adjacentContext.role === 'assistant' ? '→ Assistant' : '← You';
+      let adjSnippet = r.adjacentContext.snippet;
+      if (adjSnippet.length > maxWidth - prefix.length - 4) {
+        adjSnippet = adjSnippet.slice(0, maxWidth - prefix.length - 7) + '...';
+      }
+      console.log(`   ${prefix}: ${adjSnippet}`);
+    }
     console.log(`   ID: ${r.conversation.id}`);
     console.log('');
   }

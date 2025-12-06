@@ -158,6 +158,21 @@ export function MatchesView({
               <Box marginLeft={indexWidth + 1} width={contentWidth}>
                 <HighlightedText text={snippetText} query={query} />
               </Box>
+              {/* Row 3: Adjacent context (e.g., assistant response after user query) */}
+              {match.adjacentContext && (
+                <Box marginLeft={indexWidth + 1} width={contentWidth}>
+                  <Text color="gray" wrap="truncate-end">
+                    {match.adjacentContext.role === 'assistant' ? '→ ' : '← '}
+                    <Text color={match.adjacentContext.role === 'assistant' ? 'green' : 'blue'}>
+                      {match.adjacentContext.role === 'assistant' ? 'Assistant' : 'You'}
+                    </Text>
+                    {': '}
+                    {match.adjacentContext.snippet.length > contentWidth - 15
+                      ? match.adjacentContext.snippet.slice(0, contentWidth - 18) + '…'
+                      : match.adjacentContext.snippet}
+                  </Text>
+                </Box>
+              )}
               {/* Spacer for consistent vertical spacing */}
               <Text> </Text>
             </Box>

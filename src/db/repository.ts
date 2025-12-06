@@ -25,6 +25,7 @@ import {
   type SearchResponse,
   type ConversationFile,
   type MessageFile,
+  type AdjacentContext,
   FileEdit,
 } from '../schema/index';
 import { EMBEDDING_DIMENSIONS, embedQuery } from '../embeddings/index';
@@ -123,6 +124,29 @@ function extractSnippet(
     snippet: prefix + snippet + suffix,
     highlightRanges,
   };
+}
+
+// Threshold for "short" messages that should include adjacent context
+const SHORT_MESSAGE_THRESHOLD = 150;
+// Maximum length for adjacent context snippets
+const ADJACENT_SNIPPET_LENGTH = 200;
+
+/**
+ * Create a simple snippet from the beginning of a message (for adjacent context).
+ * Unlike extractSnippet, this doesn't center around search terms.
+ */
+function createAdjacentSnippet(content: string, maxLength = ADJACENT_SNIPPET_LENGTH): string {
+  const cleaned = content.replace(/\n+/g, ' ').trim();
+  if (cleaned.length <= maxLength) {
+    return cleaned;
+  }
+  // Try to break at a word boundary
+  const truncated = cleaned.slice(0, maxLength);
+  const lastSpace = truncated.lastIndexOf(' ');
+  if (lastSpace > maxLength * 0.7) {
+    return truncated.slice(0, lastSpace) + '…';
+  }
+  return truncated + '…';
 }
 
 // ============ Conversation Repository ============
@@ -1314,6 +1338,55 @@ export async function getFileMatchesForConversations(
 
 // ============ Search Service ============
 
+/**
+ * Add adjacent context to matches (e.g., assistant response after a user question).
+ * This helps users see the resolution/outcome, not just where the term appeared.
+ */
+async function enrichMatchesWithAdjacentContext(
+  matches: MessageMatch[],
+  conversationId: string
+): Promise<MessageMatch[]> {
+  if (matches.length === 0) return matches;
+
+  // Fetch all messages for this conversation to find adjacent messages
+  const allMessages = await messageRepo.findByConversation(conversationId);
+  if (allMessages.length === 0) return matches;
+
+  // Build a map of messageIndex -> message for quick lookup
+  const messageByIndex = new Map(allMessages.map((m) => [m.messageIndex, m]));
+
+  return matches.map((match) => {
+    // For short user messages, include the following assistant response
+    if (match.role === 'user' && match.content.length < SHORT_MESSAGE_THRESHOLD) {
+      const nextMsg = messageByIndex.get(match.messageIndex + 1);
+      if (nextMsg && nextMsg.role === 'assistant') {
+        const adjacentContext: AdjacentContext = {
+          role: 'assistant',
+          snippet: createAdjacentSnippet(nextMsg.content),
+          messageIndex: nextMsg.messageIndex,
+        };
+        return { ...match, adjacentContext };
+      }
+    }
+
+    // For assistant messages, optionally include the preceding user question
+    // This gives context for why the assistant said what it did
+    if (match.role === 'assistant') {
+      const prevMsg = messageByIndex.get(match.messageIndex - 1);
+      if (prevMsg && prevMsg.role === 'user' && prevMsg.content.length < SHORT_MESSAGE_THRESHOLD * 2) {
+        const adjacentContext: AdjacentContext = {
+          role: 'user',
+          snippet: createAdjacentSnippet(prevMsg.content),
+          messageIndex: prevMsg.messageIndex,
+        };
+        return { ...match, adjacentContext };
+      }
+    }
+
+    return match;
+  });
+}
+
 export async function search(query: string, limit = 50): Promise<SearchResponse> {
   const startTime = Date.now();
 
@@ -1345,23 +1418,27 @@ export async function search(query: string, limit = 50): Promise<SearchResponse>
     }
   }
 
-  // 4. Build ConversationResult objects
-  const results: ConversationResult[] = conversations
-    .map((conv) => {
-      const matches = grouped[conv.id] ?? [];
-      const sortedMatches = [...matches].sort((a, b) => b.score - a.score);
-      const bestMatch = sortedMatches[0];
+  // 4. Build ConversationResult objects with enriched matches
+  const results: ConversationResult[] = [];
 
-      if (!bestMatch) return null;
+  for (const conv of conversations) {
+    const matches = grouped[conv.id] ?? [];
+    if (matches.length === 0) continue;
 
-      return {
-        conversation: conv,
-        matches: sortedMatches,
-        bestMatch,
-        totalMatches: matches.length,
-      };
-    })
-    .filter((r): r is ConversationResult => r !== null);
+    // Enrich matches with adjacent context (e.g., assistant response after user query)
+    const enrichedMatches = await enrichMatchesWithAdjacentContext(matches, conv.id);
+    const sortedMatches = [...enrichedMatches].sort((a, b) => b.score - a.score);
+    const bestMatch = sortedMatches[0];
+
+    if (!bestMatch) continue;
+
+    results.push({
+      conversation: conv,
+      matches: sortedMatches,
+      bestMatch,
+      totalMatches: matches.length,
+    });
+  }
 
   // 5. Sort by best match score
   results.sort((a, b) => b.bestMatch.score - a.bestMatch.score);

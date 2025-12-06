@@ -30,6 +30,13 @@ export interface OpenCodeServerState {
   sessionId?: string;
 }
 
+export interface StartServerOptions {
+  /** Custom XDG_CONFIG_HOME for isolated config */
+  xdgConfigHome?: string;
+  /** Custom XDG_DATA_HOME for isolated data/auth */
+  xdgDataHome?: string;
+}
+
 /**
  * Wait for OpenCode server to be ready by polling the output
  */
@@ -70,12 +77,25 @@ export function waitForServer(proc: ChildProcess, timeout = 30000): Promise<stri
 }
 
 /**
- * Start the OpenCode server with isolated data directory
+ * Start the OpenCode server with optional isolated directories
  */
-export async function startServer(): Promise<OpenCodeServerState> {
-  // Ensure the local OpenCode home directory exists
-  if (!existsSync(DEX_OPENCODE_HOME)) {
-    mkdirSync(DEX_OPENCODE_HOME, { recursive: true });
+export async function startServer(options?: StartServerOptions): Promise<OpenCodeServerState> {
+  // Build environment variables
+  const env: Record<string, string | undefined> = { ...process.env };
+
+  if (options?.xdgConfigHome) {
+    env.XDG_CONFIG_HOME = options.xdgConfigHome;
+  }
+  if (options?.xdgDataHome) {
+    env.XDG_DATA_HOME = options.xdgDataHome;
+  }
+
+  // If no XDG options provided, use default isolation via OPENCODE_HOME
+  if (!options?.xdgConfigHome && !options?.xdgDataHome) {
+    if (!existsSync(DEX_OPENCODE_HOME)) {
+      mkdirSync(DEX_OPENCODE_HOME, { recursive: true });
+    }
+    env.OPENCODE_HOME = DEX_OPENCODE_HOME;
   }
 
   // Find an available port (let the OS choose)
@@ -84,11 +104,7 @@ export async function startServer(): Promise<OpenCodeServerState> {
   const proc = spawn(OPENCODE_BIN, ['serve', `--port=${port}`], {
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: false,
-    env: {
-      ...process.env,
-      // Use isolated data directory so title gen sessions don't pollute global state
-      OPENCODE_HOME: DEX_OPENCODE_HOME,
-    },
+    env,
   });
 
   try {

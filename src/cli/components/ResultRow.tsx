@@ -155,6 +155,21 @@ export function ResultRow({
           <HighlightedText text={snippetText} query={query} dimColor />
         )}
       </Box>
+      {/* Row 4: Adjacent context (e.g., assistant response after user query) */}
+      {!hasFileMatches && bestMatch.adjacentContext && (
+        <Box marginLeft={indexWidth + (indexWidth > 0 ? 1 : 0)} width={contentWidth}>
+          <Text color="gray" wrap="truncate-end">
+            {bestMatch.adjacentContext.role === 'assistant' ? '→ ' : '← '}
+            <Text color={bestMatch.adjacentContext.role === 'assistant' ? 'green' : 'blue'}>
+              {bestMatch.adjacentContext.role === 'assistant' ? 'Assistant' : 'You'}
+            </Text>
+            {': '}
+            {bestMatch.adjacentContext.snippet.length > contentWidth - 15
+              ? bestMatch.adjacentContext.snippet.slice(0, contentWidth - 18) + '…'
+              : bestMatch.adjacentContext.snippet}
+          </Text>
+        </Box>
+      )}
     </Box>
   );
 }

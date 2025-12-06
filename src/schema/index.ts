@@ -162,6 +162,14 @@ export const SyncState = z.object({
 });
 export type SyncState = z.infer<typeof SyncState>;
 
+// Adjacent message context for search results
+export const AdjacentContext = z.object({
+  role: z.enum(['user', 'assistant', 'system']),
+  snippet: z.string(),
+  messageIndex: z.number(),
+});
+export type AdjacentContext = z.infer<typeof AdjacentContext>;
+
 // Search result types
 export const MessageMatch = z.object({
   messageId: z.string(),
@@ -172,6 +180,8 @@ export const MessageMatch = z.object({
   highlightRanges: z.array(z.tuple([z.number(), z.number()])),
   score: z.number(),
   messageIndex: z.number(),
+  // Adjacent message context (e.g., assistant response after a matched user message)
+  adjacentContext: AdjacentContext.optional(),
 });
 export type MessageMatch = z.infer<typeof MessageMatch>;
 
