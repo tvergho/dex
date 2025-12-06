@@ -14,9 +14,10 @@ export interface MockClaudeEntry {
   parentUuid?: string | null;
   timestamp?: string;
   cwd?: string;
+  isSidechain?: boolean;
   message?: {
     role: 'user' | 'assistant';
-    content: string | Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }>;
+    content: string | Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown; tool_use_id?: string }>;
     model?: string;
     usage?: {
       input_tokens?: number;
