@@ -1,8 +1,9 @@
 /**
- * Tests for messageCount filtering behavior across adapters.
+ * Tests for messageCount behavior across adapters.
  *
- * These tests verify that tool-only messages (messages with empty content)
- * are excluded from the messageCount in all adapters, ensuring consistency.
+ * messageCount represents the number of "turns" in a conversation, where
+ * consecutive same-role messages are combined into a single turn.
+ * Tool-only messages (empty content) are also excluded.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
@@ -134,7 +135,8 @@ describe('messageCount filtering', () => {
       // msg-2: assistant "Let me help you." -> included
       // msg-3: assistant empty content -> EXCLUDED
       // msg-4: assistant "Done reading the file." -> included
-      expect(normalized.conversation.messageCount).toBe(3);
+      // Combined: user(1) + assistant-run(1) = 2 turns
+      expect(normalized.conversation.messageCount).toBe(2);
       expect(normalized.messages.length).toBe(3);
       expect(normalized.messages.map((m) => m.content)).toEqual([
         'Hello',
@@ -251,10 +253,11 @@ describe('messageCount filtering', () => {
         mtime: Date.now(),
       });
 
-      // messageCount should always equal messages.length
-      expect(normalized.conversation.messageCount).toBe(normalized.messages.length);
-      // Should be 4: Query 1, Response 1, Query 2, Response 2
+      // messageCount = combined turns, messages.length = individual messages
+      // After filtering: Query 1 (user), Response 1 (assistant), Query 2 (user), Response 2 (assistant)
+      // After combining: 4 turns (alternating roles)
       expect(normalized.conversation.messageCount).toBe(4);
+      expect(normalized.messages.length).toBe(4);
     });
 
     it('propagates stats from tool-only messages to visible messages', async () => {
@@ -384,9 +387,9 @@ describe('messageCount filtering', () => {
         mtime: Date.now(),
       });
 
-      // Should have 3 messages (user + 2 assistants with text), not 4
-      // msg-3 has empty content (tool-only) and should be excluded
-      expect(normalized.conversation.messageCount).toBe(3);
+      // After filtering: user, assistant, assistant = 3 messages (msg-3 excluded)
+      // After combining: user(1) + assistant-run(1) = 2 turns
+      expect(normalized.conversation.messageCount).toBe(2);
       expect(normalized.messages.length).toBe(3);
     });
 
@@ -490,10 +493,10 @@ describe('messageCount filtering', () => {
         mtime: Date.now(),
       });
 
-      // messageCount should always equal messages.length
-      expect(normalized.conversation.messageCount).toBe(normalized.messages.length);
-      // Should be 4: Query 1, Response 1, Query 2, Response 2 (msg-3 excluded)
+      // After filtering: Query 1 (user), Response 1 (assistant), Query 2 (user), Response 2 (assistant)
+      // After combining: 4 turns (alternating roles)
       expect(normalized.conversation.messageCount).toBe(4);
+      expect(normalized.messages.length).toBe(4);
     });
   });
 
@@ -587,13 +590,15 @@ describe('messageCount filtering', () => {
         mtime: Date.now(),
       });
 
-      // Both should have same count: 2 (user + non-empty assistant)
+      // Both should have same count: 2 turns (user + assistant)
+      // Claude: user, assistant (empty filtered), assistant -> user, assistant = 2 messages, 2 turns
+      // OpenCode: user, assistant (tool filtered), assistant -> user, assistant = 2 messages, 2 turns
       expect(claudeNormalized.conversation.messageCount).toBe(2);
       expect(openCodeNormalized.conversation.messageCount).toBe(2);
 
-      // Both should satisfy: messageCount === messages.length
-      expect(claudeNormalized.conversation.messageCount).toBe(claudeNormalized.messages.length);
-      expect(openCodeNormalized.conversation.messageCount).toBe(openCodeNormalized.messages.length);
+      // Messages stored should be 2 each
+      expect(claudeNormalized.messages.length).toBe(2);
+      expect(openCodeNormalized.messages.length).toBe(2);
     });
   });
 });

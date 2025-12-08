@@ -3,6 +3,7 @@ import { detectClaudeCode, discoverProjects, getProjectsRootMtime } from './path
 import { extractConversations, type RawConversation } from './parser.js';
 import { Source, type Conversation, type Message, type SourceRef, type ToolCall, type ConversationFile, type MessageFile, type FileEdit } from '../../schema/index.js';
 import type { SourceAdapter, SourceLocation, NormalizedConversation, ExtractionProgress } from '../types.js';
+import { countCombinedMessages } from '../types.js';
 
 export class ClaudeCodeAdapter implements SourceAdapter {
   name = Source.ClaudeCode;
@@ -91,7 +92,7 @@ export class ClaudeCodeAdapter implements SourceAdapter {
       mode: 'agent', // Claude Code is always agent mode
       createdAt,
       updatedAt,
-      messageCount: mainMessages.length,
+      messageCount: countCombinedMessages(mainMessages),
       sourceRef,
       totalInputTokens: raw.totalInputTokens,
       totalOutputTokens: raw.totalOutputTokens,

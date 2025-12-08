@@ -3,6 +3,7 @@ import { detectCodex, discoverSessions, getSessionsRootMtime } from './paths.js'
 import { extractConversation, type RawConversation } from './parser.js';
 import { Source, type Conversation, type Message, type SourceRef, type ToolCall, type ConversationFile, type MessageFile, type FileEdit } from '../../schema/index.js';
 import type { SourceAdapter, SourceLocation, NormalizedConversation, ExtractionProgress } from '../types.js';
+import { countCombinedMessages } from '../types.js';
 
 export class CodexAdapter implements SourceAdapter {
   name = Source.Codex;
@@ -92,7 +93,7 @@ export class CodexAdapter implements SourceAdapter {
       mode: 'agent', // Codex CLI is always agent mode
       createdAt,
       updatedAt,
-      messageCount: raw.messages.length,
+      messageCount: countCombinedMessages(raw.messages),
       sourceRef,
       // Token totals from session
       totalInputTokens: raw.totalInputTokens,

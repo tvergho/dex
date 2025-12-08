@@ -12,6 +12,7 @@ import {
   type FileEdit,
 } from '../../schema/index.js';
 import type { SourceAdapter, SourceLocation, NormalizedConversation, ExtractionProgress } from '../types.js';
+import { countCombinedMessages } from '../types.js';
 
 export class OpenCodeAdapter implements SourceAdapter {
   name = Source.OpenCode;
@@ -147,7 +148,7 @@ export class OpenCodeAdapter implements SourceAdapter {
       mode: raw.mode || 'agent', // OpenCode is typically agent mode
       createdAt,
       updatedAt,
-      messageCount: mainMessages.length,
+      messageCount: countCombinedMessages(mainMessages),
       sourceRef,
       totalInputTokens: raw.totalInputTokens,
       totalOutputTokens: raw.totalOutputTokens,

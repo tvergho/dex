@@ -21,6 +21,25 @@ export interface ExtractionProgress {
   total: number;
 }
 
+/**
+ * Count combined messages where consecutive same-role messages count as 1.
+ * This gives a more intuitive "turns" count rather than raw message count.
+ *
+ * Example: [user, assistant, assistant, assistant, user, assistant]
+ * Raw count: 6, Combined count: 4 (user, assistant-run, user, assistant)
+ */
+export function countCombinedMessages(messages: Array<{ role: string }>): number {
+  let count = 0;
+  let lastRole: string | null = null;
+  for (const msg of messages) {
+    if (msg.role !== lastRole) {
+      count++;
+      lastRole = msg.role;
+    }
+  }
+  return count;
+}
+
 export interface SourceAdapter {
   name: SourceType;
 

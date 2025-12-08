@@ -3,6 +3,7 @@ import { getGlobalDatabase, getGlobalDbMtime } from './paths';
 import { extractConversations, type RawConversation, type ExtractionProgress } from './parser';
 import { Source, type Conversation, type Message, type SourceRef, type ToolCall, type ConversationFile, type MessageFile, type FileEdit } from '../../schema/index';
 import type { SourceAdapter, SourceLocation, NormalizedConversation } from '../types';
+import { countCombinedMessages } from '../types';
 
 export type { ExtractionProgress } from './parser';
 
@@ -88,7 +89,7 @@ export class CursorAdapter implements SourceAdapter {
       mode: raw.mode,
       createdAt,
       updatedAt,
-      messageCount: mainBubbles.length,
+      messageCount: countCombinedMessages(mainBubbles.map(b => ({ role: b.type }))),
       sourceRef,
       totalInputTokens: raw.totalInputTokens,
       totalOutputTokens: raw.totalOutputTokens,
