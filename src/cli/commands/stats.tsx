@@ -7,7 +7,7 @@
  * Or use --summary for quick non-interactive output
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { withFullScreen, useScreenSize } from 'fullscreen-ink';
 import { connect } from '../../db/index';
@@ -56,7 +56,16 @@ import { ProgressBar } from '../components/HorizontalBar';
 import { ActivityHeatmap, HourlyActivity, WeeklyActivity } from '../components/ActivityHeatmap';
 import { ConversationView } from '../components/ConversationView';
 import { MessageDetailView } from '../components/MessageDetailView';
-import { formatSourceLabel, combineConsecutiveMessages, getRenderedLineCount, type CombinedMessage } from '../../utils/format';
+import {
+  formatSourceLabel,
+  combineConsecutiveMessages,
+  getRenderedLineCount,
+  parseToolOutputsFromContent,
+  renderSegmentsWithCollapse,
+  type CombinedMessage,
+  type ToolOutputBlock,
+  type ContentSegment,
+} from '../../utils/format';
 import { Source, type Conversation, type ConversationFile, type MessageFile } from '../../schema/index';
 
 interface StatsOptions {
@@ -897,6 +906,11 @@ export function StatsContent({ width, height, period, onBack }: StatsContentProp
   // Message detail view state
   const [messageScrollOffset, setMessageScrollOffset] = useState(0);
 
+  // Tool navigation state (for message detail view)
+  const [expandedToolIndices, setExpandedToolIndices] = useState<Set<number>>(new Set());
+  const [focusedToolIndex, setFocusedToolIndex] = useState<number | null>(null);
+  const [toolNavigationMode, setToolNavigationMode] = useState(false);
+
   // Project drill-down state
   const [selectedProject, setSelectedProject] = useState<ProjectStats | null>(null);
   const [projectConversations, setProjectConversations] = useState<Conversation[]>([]);
@@ -928,6 +942,28 @@ export function StatsContent({ width, height, period, onBack }: StatsContentProp
       setSelectedMessageIndex(combinedMessages.length - 1);
     }
   }, [combinedMessages.length, selectedMessageIndex]);
+
+  // Parse tool output blocks from current message content
+  const currentMessage = combinedMessages[selectedMessageIndex];
+  const { contentSegments, toolOutputBlocks } = useMemo(() => {
+    if (!currentMessage || currentMessage.role !== 'assistant') {
+      return {
+        contentSegments: [{ type: 'text' as const, content: currentMessage?.content || '' }] as ContentSegment[],
+        toolOutputBlocks: [] as ToolOutputBlock[]
+      };
+    }
+    const parsed = parseToolOutputsFromContent(currentMessage.content);
+    return { contentSegments: parsed.segments, toolOutputBlocks: parsed.blocks };
+  }, [currentMessage]);
+
+  // Reset tool state when leaving message view or changing messages
+  useEffect(() => {
+    if (viewMode !== 'message') {
+      setExpandedToolIndices(new Set());
+      setFocusedToolIndex(null);
+      setToolNavigationMode(false);
+    }
+  }, [viewMode, selectedMessageIndex]);
 
   useEffect(() => {
     async function loadData() {
@@ -1132,18 +1168,62 @@ export function StatsContent({ width, height, period, onBack }: StatsContentProp
 
     // Handle message detail view mode
     if (viewMode === 'message' && combinedMessages.length > 0) {
-      const currentMessage = combinedMessages[selectedMessageIndex];
+      const msg = combinedMessages[selectedMessageIndex];
       if (key.escape || key.backspace || key.delete || input === 'b') {
+        if (toolNavigationMode) {
+          // Exit tool navigation mode first
+          setToolNavigationMode(false);
+          setFocusedToolIndex(null);
+          return;
+        }
         setViewMode('conversation');
         setMessageScrollOffset(0);
         return;
       }
 
+      // Tab toggles tool navigation mode (if tools exist)
+      if (key.tab && toolOutputBlocks.length > 0) {
+        if (toolNavigationMode) {
+          setToolNavigationMode(false);
+          setFocusedToolIndex(null);
+        } else {
+          setToolNavigationMode(true);
+          setFocusedToolIndex(0);
+        }
+        return;
+      }
+
+      // Enter/Space toggles tool expansion (in tool mode)
+      if ((key.return || input === ' ') && toolNavigationMode && focusedToolIndex !== null) {
+        setExpandedToolIndices(prev => {
+          const newSet = new Set(prev);
+          if (newSet.has(focusedToolIndex)) {
+            newSet.delete(focusedToolIndex);
+          } else {
+            newSet.add(focusedToolIndex);
+          }
+          return newSet;
+        });
+        return;
+      }
+
+      // In tool navigation mode, j/k navigate between tools
+      if (toolNavigationMode && focusedToolIndex !== null) {
+        if (input === 'j' || key.downArrow) {
+          setFocusedToolIndex(i => Math.min((i ?? 0) + 1, toolOutputBlocks.length - 1));
+          return;
+        }
+        if (input === 'k' || key.upArrow) {
+          setFocusedToolIndex(i => Math.max((i ?? 0) - 1, 0));
+          return;
+        }
+      }
+
+      // Normal scroll handling (when not in tool mode)
       if (input === 'j' || key.downArrow) {
         // Use rendered line count and match MessageDetailView's visible height calculation
-        // MessageDetailView receives (height - 4) and subtracts headerHeight=3 for visible lines
-        const lineCount = currentMessage ? getRenderedLineCount(currentMessage.content, width) : 0;
-        const visibleLines = height - 7; // = (height - 4) - 3
+        const lineCount = msg ? getRenderedLineCount(msg.content, width) : 0;
+        const visibleLines = height - 7;
         const maxOffset = Math.max(0, lineCount - visibleLines);
         setMessageScrollOffset(o => Math.min(o + 1, maxOffset));
       } else if (input === 'k' || key.upArrow) {
@@ -1151,7 +1231,7 @@ export function StatsContent({ width, height, period, onBack }: StatsContentProp
       } else if (input === 'g') {
         setMessageScrollOffset(0);
       } else if (input === 'G') {
-        const lineCount = currentMessage ? getRenderedLineCount(currentMessage.content, width) : 0;
+        const lineCount = msg ? getRenderedLineCount(msg.content, width) : 0;
         const visibleLines = height - 7;
         setMessageScrollOffset(Math.max(0, lineCount - visibleLines));
       } else if (input === 'n') {
@@ -1159,12 +1239,18 @@ export function StatsContent({ width, height, period, onBack }: StatsContentProp
         if (selectedMessageIndex < combinedMessages.length - 1) {
           setSelectedMessageIndex(i => i + 1);
           setMessageScrollOffset(0);
+          setExpandedToolIndices(new Set());
+          setFocusedToolIndex(null);
+          setToolNavigationMode(false);
         }
       } else if (input === 'p') {
         // Previous message
         if (selectedMessageIndex > 0) {
           setSelectedMessageIndex(i => i - 1);
           setMessageScrollOffset(0);
+          setExpandedToolIndices(new Set());
+          setFocusedToolIndex(null);
+          setToolNavigationMode(false);
         }
       }
       return;
@@ -1419,10 +1505,10 @@ export function StatsContent({ width, height, period, onBack }: StatsContentProp
           <MessageDetailView
             message={combinedMessages[selectedMessageIndex]!}
             messageFiles={conversationMessageFiles}
-            toolOutputBlocks={[]}
-            contentSegments={[]}
-            expandedToolIndices={new Set()}
-            focusedToolIndex={null}
+            toolOutputBlocks={toolOutputBlocks}
+            contentSegments={contentSegments}
+            expandedToolIndices={expandedToolIndices}
+            focusedToolIndex={focusedToolIndex}
             width={width - 2}
             height={contentHeight + 2}
             scrollOffset={messageScrollOffset}
@@ -1437,9 +1523,23 @@ export function StatsContent({ width, height, period, onBack }: StatsContentProp
           </Box>
           <Box paddingX={1}>
             <Text>
-              <Text color="white">j/k</Text><Text dimColor>: scroll · </Text>
+              {toolOutputBlocks.length > 0 && (
+                <>
+                  <Text color={toolNavigationMode ? 'cyan' : 'white'}>Tab</Text>
+                  <Text dimColor>: {toolNavigationMode ? 'exit' : 'tools'} · </Text>
+                </>
+              )}
+              {toolNavigationMode ? (
+                <>
+                  <Text color="white">j/k</Text><Text dimColor>: nav tools · </Text>
+                  <Text color="white">Enter</Text><Text dimColor>: expand · </Text>
+                </>
+              ) : (
+                <>
+                  <Text color="white">j/k</Text><Text dimColor>: scroll · </Text>
+                </>
+              )}
               <Text color="white">n/p</Text><Text dimColor>: next/prev · </Text>
-              <Text color="white">g/G</Text><Text dimColor>: top/bottom · </Text>
               <Text color="white">esc/b</Text><Text dimColor>: back · </Text>
               <Text color="white">q</Text><Text dimColor>: quit</Text>
             </Text>
