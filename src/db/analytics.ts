@@ -154,6 +154,34 @@ async function queryTableWithRetry<T>(
   });
 }
 
+/**
+ * Map a raw database row to a Conversation object.
+ * Handles snake_case to camelCase conversion.
+ */
+function mapRowToConversation(row: Record<string, unknown>): Conversation {
+  return {
+    id: row.id as string,
+    source: row.source as Conversation['source'],
+    title: row.title as string,
+    subtitle: (row.subtitle as string) || undefined,
+    workspacePath: (row.workspace_path as string) || undefined,
+    projectName: (row.project_name as string) || undefined,
+    model: (row.model as string) || undefined,
+    mode: (row.mode as string) || undefined,
+    createdAt: (row.created_at as string) || undefined,
+    updatedAt: (row.updated_at as string) || undefined,
+    messageCount: (row.message_count as number) || 0,
+    sourceRef: row.source_ref_json ? JSON.parse(row.source_ref_json as string) : undefined,
+    totalInputTokens: (row.total_input_tokens as number) || undefined,
+    totalOutputTokens: (row.total_output_tokens as number) || undefined,
+    totalCacheCreationTokens: (row.total_cache_creation_tokens as number) || undefined,
+    totalCacheReadTokens: (row.total_cache_read_tokens as number) || undefined,
+    totalLinesAdded: (row.total_lines_added as number) || undefined,
+    totalLinesRemoved: (row.total_lines_removed as number) || undefined,
+    compactCount: (row.compact_count as number) || undefined,
+  };
+}
+
 // --- Query Functions ---
 
 export async function getOverviewStats(period: PeriodFilter): Promise<OverviewStats> {
@@ -384,7 +412,8 @@ export async function getTopConversationsByTokens(
     return bTokens - aTokens;
   });
 
-  return filtered.slice(0, limit) as Conversation[];
+  // Map raw rows to Conversation objects with proper camelCase properties
+  return filtered.slice(0, limit).map(row => mapRowToConversation(row as Record<string, unknown>));
 }
 
 export async function getLinesGeneratedStats(
@@ -720,7 +749,8 @@ export async function getConversationsByProject(
     return bDate.localeCompare(aDate);
   });
 
-  return filtered as Conversation[];
+  // Map raw rows to Conversation objects with proper camelCase properties
+  return filtered.map(row => mapRowToConversation(row as Record<string, unknown>));
 }
 
 // --- File Analytics ---
